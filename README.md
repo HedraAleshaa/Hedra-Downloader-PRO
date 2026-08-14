@@ -63,6 +63,7 @@
 * **Drag and Drop (DnD) File & Link Import**: Drag `.txt` link lists directly into Batch tabs or drop links/files onto Single tabs to auto-populate and analyze immediately.
 * **Desktop Toast Notifications & Audio Chimes**: Dispatches native Windows 10/11 desktop notifications and subtle audio chimes when downloads or queues complete.
 * **Direct Media Playback & Explorer Location in History**: History tab includes **▶ Play** (opens media in default player like VLC) and **📁 Folder** (highlights the file in Windows Explorer).
+* **Interactive Visual Clip Studio (Dual Sliders & Quick Trimming)**: Expandable segment trimming studio featuring dual Start/End timeline sliders, auto-calibrated video duration detection, live selected length badges, precision nudge buttons (`-5s`, `+5s`, `⏮ 00:00`, `⏭ End`), and zero-reencode fast stream slicing.
 * **Audio Quality Options**: Best (256 kbps), High (~192 kbps), Medium (~128 kbps), Low (64 kbps).
 
 ## 📂 Folder Structure

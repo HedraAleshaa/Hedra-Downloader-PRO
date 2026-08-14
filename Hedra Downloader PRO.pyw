@@ -485,6 +485,17 @@ def format_size(bytes_size):
         size /= 1024.0
     return f"{size:.2f} TB"
 
+def format_seconds_to_time(seconds):
+    """Convert float/int seconds into clean mm:ss or hh:mm:ss string."""
+    if seconds is None or seconds < 0:
+        return "00:00"
+    sec = int(round(seconds))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
 def get_audio_bitrate(q_var):
     return AUDIO_BITRATE_MAP.get(q_var.get(), 256)
 
@@ -601,27 +612,28 @@ def parse_rate_limit(text):
 
 def parse_timestamp(text):
     """Convert hh:mm:ss, mm:ss, raw seconds, or '2m 30s' string to float seconds."""
-    text = text.strip().lower()
+    if text is None:
+        return None
+    text = str(text).strip().lower()
     if not text:
         return None
     
-    import re
     if re.search(r'[hms]', text):
-        total = 0
+        total = 0.0
         h = re.search(r'(\d+)\s*h', text)
         m = re.search(r'(\d+)\s*m', text)
         s = re.search(r'(\d+(?:\.\d+)?)\s*s', text)
         if h: total += int(h.group(1)) * 3600
         if m: total += int(m.group(1)) * 60
         if s: total += float(s.group(1))
-        return total
+        return float(total)
 
     parts = text.split(":")
     try:
         if len(parts) == 3:
-            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+            return float(int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2]))
         elif len(parts) == 2:
-            return int(parts[0]) * 60 + float(parts[1])
+            return float(int(parts[0]) * 60 + float(parts[1]))
         return float(text)
     except (ValueError, IndexError):
         return None
@@ -963,9 +975,11 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
 
         # ── Segment / clip download ────────────────────────────────
         if seg_start is not None or seg_end is not None:
-            opts['download_ranges'] = yt_dlp.utils.download_range_func(
-                None, [(seg_start or 0.0, seg_end if seg_end is not None else float('inf'))])
-            opts['force_keyframes_at_cuts'] = True
+            s_val = seg_start if seg_start is not None else 0.0
+            e_val = seg_end if seg_end is not None else float('inf')
+            opts['download_ranges'] = yt_dlp.utils.download_range_func(None, [(s_val, e_val)])
+            opts['force_keyframes_at_cuts'] = False
+            opts['postprocessor_args'] = {'ffmpeg': ['-avoid_negative_ts', 'make_zero']}
         
         postprocessors = []
         
@@ -1047,9 +1061,11 @@ def get_audio_opts(q_var, fmt_var, target_dir,
 
         # ── Segment / clip download ────────────────────────────────
         if seg_start is not None or seg_end is not None:
-            opts['download_ranges'] = yt_dlp.utils.download_range_func(
-                None, [(seg_start or 0.0, seg_end if seg_end is not None else float('inf'))])
-            opts['force_keyframes_at_cuts'] = True
+            s_val = seg_start if seg_start is not None else 0.0
+            e_val = seg_end if seg_end is not None else float('inf')
+            opts['download_ranges'] = yt_dlp.utils.download_range_func(None, [(s_val, e_val)])
+            opts['force_keyframes_at_cuts'] = False
+            opts['postprocessor_args'] = {'ffmpeg': ['-avoid_negative_ts', 'make_zero']}
         
         postprocessors = [
             {'key': 'FFmpegExtractAudio',
@@ -1508,6 +1524,16 @@ def execute_standard_analysis(opts, links, info_box,
                         title_str   = title
                         if i == 0:
                             thumb_url = best_thumb
+                            dur = info.get('duration')
+                            if dur:
+                                if tab == "Single Video" and 'vid_seg_start' in globals() and hasattr(vid_seg_start, "_set_duration"):
+                                    app.after(0, lambda d=dur: vid_seg_start._set_duration(d))
+                                elif tab == "Single Audio" and 'aud_seg_start' in globals() and hasattr(aud_seg_start, "_set_duration"):
+                                    app.after(0, lambda d=dur: aud_seg_start._set_duration(d))
+                                elif tab == "Batch Video" and 'bvid_seg_start' in globals() and hasattr(bvid_seg_start, "_set_duration"):
+                                    app.after(0, lambda d=dur: bvid_seg_start._set_duration(d))
+                                elif tab == "Batch Audio" and 'baud_seg_start' in globals() and hasattr(baud_seg_start, "_set_duration"):
+                                    app.after(0, lambda d=dur: baud_seg_start._set_duration(d))
                         if len(title) > 65:
                             title = title[:62] + "…"
                         details.append(f"[{format_size(size_bytes):>12}]  {title}")
@@ -2111,53 +2137,230 @@ def bind_keyboard_shortcuts(entry, dl_cmd):
     entry.bind("<Control-S>", lambda e: dl_cmd())
 
 def make_segment_row(parent, check_cmd=None):
-    """Creates an expandable ✂ Clip Segment row inside an options panel.
+    """Creates an interactive Visual Clip / Segment Studio.
     Returns (enabled_var, start_entry, end_entry)."""
-    outer = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=8)
+    outer = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=10)
     outer.pack(fill="x", padx=20, pady=(0, 6))
 
     header = ctk.CTkFrame(outer, fg_color="transparent")
     header.pack(fill="x", padx=12, pady=(8, 4))
 
     enabled_var = ctk.BooleanVar(value=False)
-    ctk.CTkCheckBox(
-        header, text="✂  Clip / Segment  (download only a portion)",
+    chk = ctk.CTkCheckBox(
+        header, text="✂  Clip / Segment Studio  (download portion)",
         variable=enabled_var,
         font=("Segoe UI", 12, "bold"), text_color=COL_TEXT
-    ).pack(side="left")
+    )
+    chk.pack(side="left")
+
+    badge_lbl = ctk.CTkLabel(
+        header, text="",
+        font=("Consolas", 11, "bold"), text_color=COL_ACCENT
+    )
+    badge_lbl.pack(side="right", padx=(0, 4))
 
     body = ctk.CTkFrame(outer, fg_color="transparent")
 
-    row = ctk.CTkFrame(body, fg_color="transparent")
-    row.pack(fill="x", padx=12, pady=(2, 8))
+    # State
+    state = {
+        "max_duration": 300.0,
+        "is_syncing": False,
+        "debounce_id": None,
+    }
 
-    ctk.CTkLabel(row, text="Start:", font=LABEL_FONT).pack(side="left", padx=(0, 5))
-    start_entry = ctk.CTkEntry(row, width=100, font=ENTRY_FONT,
-                               placeholder_text="e.g. 1m 30s")
-    start_entry.pack(side="left", padx=(0, 16))
+    # ── Sliders Frame ──────────────────────────────────────
+    studio_box = ctk.CTkFrame(body, fg_color=COL_DARK, corner_radius=8)
+    studio_box.pack(fill="x", padx=12, pady=(2, 6))
 
-    ctk.CTkLabel(row, text="End:", font=LABEL_FONT).pack(side="left", padx=(0, 5))
-    end_entry = ctk.CTkEntry(row, width=100, font=ENTRY_FONT,
-                             placeholder_text="e.g. 2m 45s")
-    end_entry.pack(side="left", padx=(0, 16))
+    # Row 1: Start Slider & Controls
+    row_start = ctk.CTkFrame(studio_box, fg_color="transparent")
+    row_start.pack(fill="x", padx=10, pady=(8, 4))
 
-    ctk.CTkLabel(row, text="Leave both empty = full download",
-                 font=("Segoe UI", 10), text_color=COL_MUTED).pack(side="left")
+    ctk.CTkLabel(row_start, text="Start:", width=45, font=LABEL_FONT, anchor="w").pack(side="left")
+    start_entry = ctk.CTkEntry(row_start, width=80, font=ENTRY_FONT, placeholder_text="00:00")
+    start_entry.insert(0, "00:00")
+    start_entry.pack(side="left", padx=(0, 8))
+
+    slider_start = ctk.CTkSlider(row_start, from_=0, to=state["max_duration"],
+                                 progress_color=COL_ACCENT, fg_color="#1E293B",
+                                 height=18)
+    slider_start.set(0)
+    slider_start.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+    def _apply_start(val):
+        if state["is_syncing"]: return
+        state["is_syncing"] = True
+        val = max(0.0, min(float(val), slider_end.get()))
+        slider_start.set(val)
+        start_entry.delete(0, "end")
+        start_entry.insert(0, format_seconds_to_time(val))
+        state["is_syncing"] = False
+        _update_badge()
+        _trigger_check_debounced()
+
+    def _apply_end(val):
+        if state["is_syncing"]: return
+        state["is_syncing"] = True
+        val = max(slider_start.get(), min(float(val), state["max_duration"]))
+        slider_end.set(val)
+        end_entry.delete(0, "end")
+        end_entry.insert(0, format_seconds_to_time(val))
+        state["is_syncing"] = False
+        _update_badge()
+        _trigger_check_debounced()
+
+    def _nudge_start(delta):
+        s_val = parse_timestamp(start_entry.get()) or 0.0
+        new_val = max(0.0, min(s_val + delta, slider_end.get()))
+        _apply_start(new_val)
+
+    ctk.CTkButton(row_start, text="⏮", width=28, height=26, font=("Segoe UI", 11, "bold"),
+                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
+                  command=lambda: _apply_start(0.0)).pack(side="left", padx=2)
+    ctk.CTkButton(row_start, text="−5s", width=34, height=26, font=("Segoe UI", 10),
+                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
+                  command=lambda: _nudge_start(-5.0)).pack(side="left", padx=2)
+    ctk.CTkButton(row_start, text="+5s", width=34, height=26, font=("Segoe UI", 10),
+                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
+                  command=lambda: _nudge_start(5.0)).pack(side="left", padx=2)
+
+    # Row 2: End Slider & Controls
+    row_end = ctk.CTkFrame(studio_box, fg_color="transparent")
+    row_end.pack(fill="x", padx=10, pady=(4, 8))
+
+    ctk.CTkLabel(row_end, text="End:", width=45, font=LABEL_FONT, anchor="w").pack(side="left")
+    end_entry = ctk.CTkEntry(row_end, width=80, font=ENTRY_FONT, placeholder_text="End")
+    end_entry.pack(side="left", padx=(0, 8))
+
+    slider_end = ctk.CTkSlider(row_end, from_=0, to=state["max_duration"],
+                               progress_color=COL_ACCENT, fg_color="#1E293B",
+                               height=18)
+    slider_end.set(state["max_duration"])
+    slider_end.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+    def _nudge_end(delta):
+        e_val = parse_timestamp(end_entry.get())
+        if e_val is None: e_val = state["max_duration"]
+        new_val = max(slider_start.get(), min(e_val + delta, state["max_duration"]))
+        _apply_end(new_val)
+
+    ctk.CTkButton(row_end, text="−5s", width=34, height=26, font=("Segoe UI", 10),
+                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
+                  command=lambda: _nudge_end(-5.0)).pack(side="left", padx=2)
+    ctk.CTkButton(row_end, text="+5s", width=34, height=26, font=("Segoe UI", 10),
+                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
+                  command=lambda: _nudge_end(5.0)).pack(side="left", padx=2)
+    ctk.CTkButton(row_end, text="⏭", width=28, height=26, font=("Segoe UI", 11, "bold"),
+                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
+                  command=lambda: _apply_end(state["max_duration"])).pack(side="left", padx=2)
+
+    # ── Summary & Presets Bar ──
+    info_row = ctk.CTkFrame(body, fg_color="transparent")
+    info_row.pack(fill="x", padx=12, pady=(0, 8))
+
+    summary_lbl = ctk.CTkLabel(info_row, text="Selected: Full Video",
+                              font=("Segoe UI", 11, "bold"), text_color=COL_ACCENT)
+    summary_lbl.pack(side="left")
+
+    def _reset_full():
+        _apply_start(0.0)
+        _apply_end(state["max_duration"])
+        end_entry.delete(0, "end")
+
+    ctk.CTkButton(info_row, text="🎯 Full Video (Reset)", width=130, height=24,
+                  font=("Segoe UI", 10, "bold"), fg_color=COL_CHECK, hover_color=COL_CHECKH,
+                  command=_reset_full).pack(side="right")
+
+    # ── Synchronization Logic ──────────────────────────────
+    def _update_badge():
+        s_val = slider_start.get()
+        e_val = slider_end.get()
+        max_d = state["max_duration"]
+        clip_len = max(0.0, e_val - s_val)
+        txt = f"⏱ {format_seconds_to_time(s_val)} → {format_seconds_to_time(e_val)} ({format_seconds_to_time(clip_len)})"
+        badge_lbl.configure(text=txt if enabled_var.get() else "")
+        summary_lbl.configure(text=f"Clip Length: {format_seconds_to_time(clip_len)}  |  Total: {format_seconds_to_time(max_d)}")
+
+    def _trigger_check_debounced():
+        if check_cmd:
+            if state["debounce_id"]:
+                try: app.after_cancel(state["debounce_id"])
+                except Exception: pass
+            state["debounce_id"] = app.after(350, check_cmd)
+
+    def _on_slider_start_drag(val):
+        if state["is_syncing"]: return
+        fval = float(val)
+        if fval > slider_end.get():
+            slider_end.set(fval)
+            end_entry.delete(0, "end")
+            end_entry.insert(0, format_seconds_to_time(fval))
+        start_entry.delete(0, "end")
+        start_entry.insert(0, format_seconds_to_time(fval))
+        _update_badge()
+        _trigger_check_debounced()
+
+    def _on_slider_end_drag(val):
+        if state["is_syncing"]: return
+        fval = float(val)
+        if fval < slider_start.get():
+            slider_start.set(fval)
+            start_entry.delete(0, "end")
+            start_entry.insert(0, format_seconds_to_time(fval))
+        end_entry.delete(0, "end")
+        end_entry.insert(0, format_seconds_to_time(fval))
+        _update_badge()
+        _trigger_check_debounced()
+
+    slider_start.configure(command=_on_slider_start_drag)
+    slider_end.configure(command=_on_slider_end_drag)
+
+    def _on_entry_start_change(*_):
+        val = parse_timestamp(start_entry.get())
+        if val is not None:
+            _apply_start(val)
+
+    def _on_entry_end_change(*_):
+        txt = end_entry.get().strip()
+        if not txt:
+            _apply_end(state["max_duration"])
+            end_entry.delete(0, "end")
+            return
+        val = parse_timestamp(txt)
+        if val is not None:
+            _apply_end(val)
+
+    start_entry.bind("<FocusOut>", _on_entry_start_change)
+    start_entry.bind("<Return>", _on_entry_start_change)
+    end_entry.bind("<FocusOut>", _on_entry_end_change)
+    end_entry.bind("<Return>", _on_entry_end_change)
+
+    def set_duration(dur):
+        if not dur or dur <= 0: return
+        dur = float(dur)
+        state["max_duration"] = dur
+        slider_start.configure(to=dur)
+        slider_end.configure(to=dur)
+        current_e = parse_timestamp(end_entry.get())
+        if current_e is None or current_e >= dur or current_e == 300.0:
+            slider_end.set(dur)
+            if end_entry.get().strip():
+                end_entry.delete(0, "end")
+                end_entry.insert(0, format_seconds_to_time(dur))
+        _update_badge()
+
+    start_entry._set_duration = set_duration
 
     def _toggle(*_):
         if enabled_var.get():
             body.pack(fill="x", after=header)
+            _update_badge()
         else:
             body.pack_forget()
+            badge_lbl.configure(text="")
+        _trigger_check_debounced()
+
     enabled_var.trace_add("write", _toggle)
-    if check_cmd:
-        def _on_seg_change(*_): app.after(100, check_cmd)
-        start_entry.bind("<FocusOut>", _on_seg_change)
-        start_entry.bind("<Return>", _on_seg_change)
-        end_entry.bind("<FocusOut>", _on_seg_change)
-        end_entry.bind("<Return>", _on_seg_change)
-        enabled_var.trace_add("write", _on_seg_change)
-        
     body.pack_forget()   # hidden by default
 
     return enabled_var, start_entry, end_entry
@@ -2170,14 +2373,14 @@ def _get_seg_params(enabled_var, start_entry, end_entry):
     e = parse_timestamp(end_entry.get())
     if s is None and e is None:
         return None, None, ""
+    if s is not None and s == 0.0 and e is None:
+        return None, None, ""
     # Validate: end must be > start
     if s is not None and e is not None and e <= s:
-        return None, None, ""   # invalid — silently treat as no segment
+        return None, None, ""
     def _fmt(sec):
         if sec is None: return "start" if s is None else "end"
-        h, rem = divmod(int(sec), 3600)
-        m, sc  = divmod(rem, 60)
-        return f"{h}:{m:02d}:{sc:02d}" if h else f"{m}:{sc:02d}"
+        return format_seconds_to_time(sec)
     label = f" [{_fmt(s)}→{_fmt(e)}]"
     return s, e, label
 
