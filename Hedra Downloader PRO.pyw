@@ -720,8 +720,13 @@ def toggle_ui(state="normal"):
 
 def trigger_stop():
     cancel_event.set()
+    global_queue.queue_cancel.set()
+    for jid, ev in list(global_queue.cancel_events.items()):
+        try: ev.set()
+        except: pass
     current = tabview.get()
     app.after(0, lambda: set_status("⏹  Aborting… cleaning up.", COL_ERR, current))
+    app.after(100, global_queue.pump)
 
 def update_info_box(widget, text, color=COL_ACCENT):
     widget.configure(state="normal")
@@ -941,6 +946,11 @@ def get_global_opts():
             opts['proxy'] = proxy
     except Exception:
         pass
+    opts['extractor_args'] = {
+        'youtube': {
+            'player_client': ['android_vr', 'android', 'web', 'mweb']
+        }
+    }
     return opts
 
 # ==========================================
@@ -1235,6 +1245,7 @@ class JobQueue:
         
     def add(self, opts, links, folder_name, mode, hint, tab, size="Unknown", quality="—", file_type="—", start_paused=False, seg_start=None, seg_end=None):
         cancel_event.clear()
+        self.queue_cancel.clear()
         cleaned_links = [normalize_media_url(l) for l in links if l and str(l).strip()]
         job = {
             "id": str(time.time()),
@@ -1277,6 +1288,7 @@ class JobQueue:
             j["status"] = "Pending"
             j["progress_text"] = "Waiting in queue..."
         cancel_event.clear()
+        self.queue_cancel.clear()
         if jid in self.cancel_events:
             self.cancel_events[jid].clear()
         app.after(0, refresh_queue_tab)
@@ -1287,11 +1299,14 @@ class JobQueue:
         if not j: return
         if j["status"] == "Downloading":
             j["status"] = "Cancelled"
+            j["progress_text"] = "Stopped."
+            j["progress_pct"] = 0.0
             if jid in self.cancel_events:
                 self.cancel_events[jid].set()
         else:
             self.jobs.remove(j)
         app.after(0, refresh_queue_tab)
+        app.after(50, self.pump)
         
     def clear_finished(self):
         self.jobs = [j for j in self.jobs if j["status"] not in ["Completed", "Error", "Cancelled"]]
@@ -1302,6 +1317,10 @@ class JobQueue:
         except: return 1
 
     def pump(self):
+        # Always purge dead threads to prevent worker desynchronization
+        self.worker_threads = {jid: t for jid, t in self.worker_threads.items() if t.is_alive()}
+        self.active_workers = len(self.worker_threads)
+
         max_c = self.get_max_concurrent()
         while self.active_workers < max_c:
             nxt = next((x for x in self.jobs if x["status"] == "Pending"), None)
@@ -1309,6 +1328,7 @@ class JobQueue:
             
             jid = nxt["id"]
             nxt["status"] = "Downloading"
+            nxt["progress_text"] = "Starting..."
             self.active_workers += 1
             self.cancel_events[jid] = threading.Event()
             app.after(0, refresh_queue_tab)
@@ -1325,28 +1345,36 @@ class JobQueue:
         def _job_progress_hook(d):
             if job_cancel and job_cancel.is_set():
                 raise ValueError("PROCESS_CANCELLED")
-            if cancel_event.is_set():
+            if cancel_event.is_set() or self.queue_cancel.is_set():
                 raise ValueError("PROCESS_CANCELLED")
                 
             def strip_ansi(text):
                 if not isinstance(text, str): return text
                 return re.sub(r'\x1b\[[0-9;]*m', '', text)
                 
+            filename = d.get('filename', '') or ''
+            is_sub = any(filename.lower().endswith(ext) for ext in ['.srt', '.vtt', '.ass', '.lrc'])
+            is_thumb = any(filename.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp'])
+
             if d['status'] == 'downloading':
                 percent_str = strip_ansi(d.get('_percent_str', '0%')).strip()
                 speed       = strip_ansi(d.get('_speed_str', 'N/A')).strip()
                 eta         = strip_ansi(d.get('_eta_str', 'N/A')).strip()
                 job['speed_bytes'] = d.get('speed') or 0
-                try:
-                    job['progress_pct'] = float(percent_str.replace('%', '')) / 100.0
-                except:
-                    pass
-                job['progress_text'] = f"{percent_str}  |  {speed}  |  ETA: {eta}"
+                if not is_sub and not is_thumb:
+                    try:
+                        job['progress_pct'] = float(percent_str.replace('%', '')) / 100.0
+                    except:
+                        pass
+                    job['progress_text'] = f"{percent_str}  |  {speed}  |  ETA: {eta}"
+                else:
+                    job['progress_text'] = f"Fetching subtitles/thumbnails... ({speed})"
                 
             elif d['status'] == 'finished':
-                job['progress_pct'] = 1.0
-                job['speed_bytes'] = 0
-                job['progress_text'] = "Post-processing..."
+                if not is_sub and not is_thumb:
+                    job['progress_pct'] = 1.0
+                    job['speed_bytes'] = 0
+                    job['progress_text'] = "Muxing & finalizing..."
 
         opts_copy = dict(job["opts"])
         hooks = opts_copy.get("progress_hooks", [])
