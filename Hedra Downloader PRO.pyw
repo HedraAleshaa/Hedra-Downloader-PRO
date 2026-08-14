@@ -982,14 +982,6 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
 
     if not for_analysis:
         opts['progress_hooks'] = [progress_hook]
-
-        # ── Segment / clip download ────────────────────────────────
-        if seg_start is not None or seg_end is not None:
-            s_val = seg_start if seg_start is not None else 0.0
-            e_val = seg_end if seg_end is not None else float('inf')
-            opts['download_ranges'] = yt_dlp.utils.download_range_func(None, [(s_val, e_val)])
-            opts['force_keyframes_at_cuts'] = False
-            opts['postprocessor_args'] = {'ffmpeg': ['-avoid_negative_ts', 'make_zero']}
         
         postprocessors = []
         
@@ -1068,14 +1060,6 @@ def get_audio_opts(q_var, fmt_var, target_dir,
     if not for_analysis:
         opts['progress_hooks'] = [progress_hook]
         opts['writethumbnail'] = True
-
-        # ── Segment / clip download ────────────────────────────────
-        if seg_start is not None or seg_end is not None:
-            s_val = seg_start if seg_start is not None else 0.0
-            e_val = seg_end if seg_end is not None else float('inf')
-            opts['download_ranges'] = yt_dlp.utils.download_range_func(None, [(s_val, e_val)])
-            opts['force_keyframes_at_cuts'] = False
-            opts['postprocessor_args'] = {'ffmpeg': ['-avoid_negative_ts', 'make_zero']}
         
         postprocessors = [
             {'key': 'FFmpegExtractAudio',
@@ -1406,6 +1390,50 @@ class JobQueue:
                         if not fpath:
                             try: fpath = ydl.prepare_filename(info)
                             except Exception: pass
+                            
+                        # Reconstructed High-Precision Segment Trimming
+                        seg_s = job.get("seg_start")
+                        seg_e = job.get("seg_end")
+                        if fpath and os.path.isfile(fpath) and (seg_s is not None or seg_e is not None):
+                            app.after(0, lambda: set_status(f"✂ Trimming clip: {job['hint']}", COL_ACCENT, job["tab"]))
+                            job["progress_text"] = "Trimming clip..."
+                            app.after(0, refresh_queue_tab)
+                            
+                            fdir, fname = os.path.split(fpath)
+                            fbase, fext = os.path.splitext(fname)
+                            temp_cut = os.path.join(fdir, f"{fbase}_temp_clip{fext}")
+                            ffmpeg_exe = os.path.join(FFMPEG_DIR, "ffmpeg.exe") if os.path.isdir(FFMPEG_DIR) and os.path.isfile(os.path.join(FFMPEG_DIR, "ffmpeg.exe")) else "ffmpeg"
+                            
+                            cmd = [ffmpeg_exe, "-y"]
+                            if seg_s is not None and seg_s > 0:
+                                cmd.extend(["-ss", str(seg_s)])
+                            if seg_e is not None and seg_e > 0:
+                                cmd.extend(["-to", str(seg_e)])
+                            cmd.extend(["-i", fpath])
+                            
+                            is_audio_mode = "Audio" in job.get("mode", "")
+                            if is_audio_mode:
+                                cmd.extend(["-c:a", "copy", temp_cut])
+                            else:
+                                cmd.extend(["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                                            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", temp_cut])
+                                            
+                            creationflags = 0x08000000 if os.name == 'nt' else 0
+                            proc = subprocess.run(cmd, capture_output=True, creationflags=creationflags)
+                            
+                            if proc.returncode != 0:
+                                cmd_fb = [ffmpeg_exe, "-y"]
+                                if seg_s is not None and seg_s > 0: cmd_fb.extend(["-ss", str(seg_s)])
+                                if seg_e is not None and seg_e > 0: cmd_fb.extend(["-to", str(seg_e)])
+                                cmd_fb.extend(["-i", fpath, "-c", "copy", temp_cut])
+                                proc = subprocess.run(cmd_fb, capture_output=True, creationflags=creationflags)
+                                
+                            if proc.returncode == 0 and os.path.isfile(temp_cut) and os.path.getsize(temp_cut) > 0:
+                                try:
+                                    os.remove(fpath)
+                                    os.replace(temp_cut, fpath)
+                                except Exception:
+                                    pass
                             
                         save_history_entry(title, link, job["mode"], sz_str, job.get("quality", "—"), job.get("file_type", "—"), file_path=fpath)
             
