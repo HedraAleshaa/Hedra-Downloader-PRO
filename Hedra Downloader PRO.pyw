@@ -104,16 +104,20 @@ AUDIO_QUALITY_MAP = {
     "Low — Smallest file":    "9",
 }
 SUBTITLE_LANG_MAP = {
-    "English subtitles":             ("en.*",    False),
-    "Auto-generated (if available)": ("en.*",    True),
-    "Arabic  (ar)":                  ("ar",      False),
-    "French  (fr)":                  ("fr",      False),
-    "Spanish (es)":                  ("es",      False),
-    "German  (de)":                  ("de",      False),
-    "Japanese (ja)":                 ("ja",      False),
-    "Chinese S. (zh-Hans)":          ("zh-Hans", False),
-    "Portuguese (pt)":               ("pt",      False),
-    "Korean  (ko)":                  ("ko",      False),
+    "English":                ["en.*", "en", "en-US", "en-GB"],
+    "Arabic (العربية)":       ["ar.*", "ar"],
+    "Spanish (Español)":      ["es.*", "es"],
+    "French (Français)":      ["fr.*", "fr"],
+    "German (Deutsch)":       ["de.*", "de"],
+    "Japanese (日本語)":       ["ja.*", "ja"],
+    "Chinese (中文)":         ["zh.*", "zh-Hans", "zh-Hant"],
+    "Portuguese (Português)": ["pt.*", "pt", "pt-BR"],
+    "Russian (Русский)":      ["ru.*", "ru"],
+    "Korean (한국어)":         ["ko.*", "ko"],
+    "Italian (Italiano)":     ["it.*", "it"],
+    "Turkish (Türkçe)":       ["tr.*", "tr"],
+    "Hindi (हिन्दी)":          ["hi.*", "hi"],
+    "All Available Languages": ["all"],
 }
 SUBTITLE_MODES = [
     "Embed in Video",
@@ -987,14 +991,10 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
         
         sub_choice = sub_var.get() if sub_var else "None"
         if sub_choice not in ("None", "[MKV Required]"):
-            lang_info = SUBTITLE_LANG_MAP.get(sub_choice)
-            if lang_info:
-                lang_code, is_auto = lang_info
-                if is_auto:
-                    opts['writeautomaticsub'] = True
-                else:
-                    opts['writesubtitles'] = True
-                opts['subtitleslangs'] = [lang_code]
+            lang_codes = SUBTITLE_LANG_MAP.get(sub_choice, ["en.*", "en"])
+            opts['writesubtitles'] = True
+            opts['writeautomaticsub'] = True
+            opts['subtitleslangs'] = lang_codes
                 
             sub_mode = global_sub_mode_var.get() if 'global_sub_mode_var' in globals() else "Embed in Video"
             
@@ -1409,14 +1409,16 @@ class JobQueue:
                                 cmd.extend(["-ss", str(seg_s)])
                             if seg_e is not None and seg_e > 0:
                                 cmd.extend(["-to", str(seg_e)])
-                            cmd.extend(["-i", fpath])
+                            cmd.extend(["-i", fpath, "-map", "0"])
                             
                             is_audio_mode = "Audio" in job.get("mode", "")
                             if is_audio_mode:
-                                cmd.extend(["-c:a", "copy", temp_cut])
+                                cmd.extend(["-c:a", "copy", "-avoid_negative_ts", "make_zero", "-reset_timestamps", "1", temp_cut])
                             else:
                                 cmd.extend(["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                                            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", temp_cut])
+                                            "-c:a", "aac", "-b:a", "192k",
+                                            "-avoid_negative_ts", "make_zero", "-reset_timestamps", "1",
+                                            "-movflags", "+faststart", temp_cut])
                                             
                             creationflags = 0x08000000 if os.name == 'nt' else 0
                             proc = subprocess.run(cmd, capture_output=True, creationflags=creationflags)
@@ -1425,13 +1427,14 @@ class JobQueue:
                                 cmd_fb = [ffmpeg_exe, "-y"]
                                 if seg_s is not None and seg_s > 0: cmd_fb.extend(["-ss", str(seg_s)])
                                 if seg_e is not None and seg_e > 0: cmd_fb.extend(["-to", str(seg_e)])
-                                cmd_fb.extend(["-i", fpath, "-c", "copy", temp_cut])
+                                cmd_fb.extend(["-i", fpath, "-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero", "-reset_timestamps", "1", temp_cut])
                                 proc = subprocess.run(cmd_fb, capture_output=True, creationflags=creationflags)
                                 
                             if proc.returncode == 0 and os.path.isfile(temp_cut) and os.path.getsize(temp_cut) > 0:
                                 try:
                                     os.remove(fpath)
                                     os.replace(temp_cut, fpath)
+                                    sz_str = format_size(os.path.getsize(fpath))
                                 except Exception:
                                     pass
                             
