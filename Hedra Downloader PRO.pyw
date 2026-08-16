@@ -53,7 +53,7 @@ def get_ffmpeg_path():
         return sys._MEIPASS
     return os.path.dirname(os.path.abspath(__file__))
 
-APP_VERSION  = "V19"
+APP_VERSION  = "V20"
 APP_AUTHOR   = "Hedra Aleshaa"
 FFMPEG_DIR   = get_ffmpeg_path()
 BASE_DIR     = os.path.join(os.path.expanduser("~"), "Downloads", "YT Downloader")
@@ -64,9 +64,13 @@ HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 ARCHIVE_FILE = os.path.join(DATA_DIR, "downloaded_archive.txt")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 QUEUE_FILE = os.path.join(DATA_DIR, "queue.json")
+THUMBS_DIR   = os.path.join(DATA_DIR, "thumbs")
+ICONS_DIR    = os.path.join(DATA_DIR, "site_icons")
 os.makedirs(VID_DIR, exist_ok=True)
 os.makedirs(AUD_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(THUMBS_DIR, exist_ok=True)
+os.makedirs(ICONS_DIR, exist_ok=True)
 
 try:
     old_hist = os.path.join(BASE_DIR, "history.json")
@@ -331,7 +335,7 @@ def load_history():
         pass
     return []
 
-def save_history_entry(title, url, mode, size_str, quality="—", file_type="—", file_path=""):
+def save_history_entry(title, url, mode, size_str, quality="—", file_type="—", file_path="", thumbnail=""):
     history = load_history()
     history.insert(0, {
         "time":      time.strftime("%Y-%m-%d %H:%M"),
@@ -342,6 +346,7 @@ def save_history_entry(title, url, mode, size_str, quality="—", file_type="—
         "quality":   quality,
         "file_type": file_type,
         "file_path": file_path or "",
+        "thumbnail": thumbnail or "",
     })
     history = history[:200]
     try:
@@ -781,29 +786,63 @@ def attach_stale_traces(vars_list, info_box, stale_banner=None):
 # ==========================================
 #  SITE LOGO LOADER  (Settings → Supported Websites)
 # ==========================================
+_site_logo_cache = {}
+
 def _load_site_logo(domain, label_widget, accent_color):
-    """Fetch a 32×32 favicon from Google's service and update the badge label."""
+    """Load or fetch a 28×28 site icon with local caching."""
     if not PIL_AVAILABLE:
         return
-    try:
-        url = f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
-        req = urllib.request.Request(
-            url, headers={"User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            )}
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = resp.read()
-        img = Image.open(io.BytesIO(data)).convert("RGBA")
-        img = img.resize((28, 28), Image.LANCZOS)
-        ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(28, 28))
-        label_widget._logo_ref = ctk_img   # prevent GC
-        app.after(0, lambda: label_widget.configure(
-            image=ctk_img, text="", compound="left", width=28))
-    except Exception:
-        pass   # keep the emoji fallback
+    local_icon = os.path.join(ICONS_DIR, f"{domain}.png")
+    
+    def _apply_image(img_obj):
+        try:
+            if img_obj.size != (28, 28):
+                img_obj = img_obj.resize((28, 28), Image.LANCZOS)
+            ctk_img = ctk.CTkImage(light_image=img_obj, dark_image=img_obj, size=(28, 28))
+            _site_logo_cache[domain] = ctk_img
+            if label_widget.winfo_exists():
+                label_widget._logo_ref = ctk_img
+                label_widget.configure(image=ctk_img, text="", width=28)
+        except Exception:
+            pass
+
+    # 1. Check memory cache
+    if domain in _site_logo_cache:
+        ctk_img = _site_logo_cache[domain]
+        label_widget._logo_ref = ctk_img
+        label_widget.configure(image=ctk_img, text="", width=28)
+        return
+
+    # 2. Check disk cache
+    if os.path.isfile(local_icon):
+        try:
+            with Image.open(local_icon) as orig:
+                img = orig.convert("RGBA").copy()
+            _apply_image(img)
+            return
+        except Exception:
+            pass
+
+    # 3. Fallback to network download
+    def _fetch_remote():
+        try:
+            url = f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = resp.read()
+            with Image.open(io.BytesIO(data)) as orig:
+                img = orig.convert("RGBA").copy()
+            try:
+                img.save(local_icon, format="PNG")
+            except Exception:
+                pass
+            app.after(0, lambda: _apply_image(img))
+        except Exception:
+            pass
+
+    threading.Thread(target=_fetch_remote, daemon=True).start()
 
 # ==========================================
 #  THUMBNAIL HELPER
@@ -1438,7 +1477,7 @@ class JobQueue:
                                 except Exception:
                                     pass
                             
-                        save_history_entry(title, link, job["mode"], sz_str, job.get("quality", "—"), job.get("file_type", "—"), file_path=fpath)
+                        save_history_entry(title, link, job["mode"], sz_str, job.get("quality", "—"), job.get("file_type", "—"), file_path=fpath, thumbnail=best_thumb)
             
             app.after(0, _increment_session_counter)
             app.after(0, lambda: set_status(f"✔ Completed: {job['hint']}", COL_SUCCESS, job["tab"]))
@@ -1834,6 +1873,113 @@ def delete_history_entry(idx):
             json.dump(history, f, indent=4)
         refresh_history_tab()
 
+_history_thumb_cache = {}
+
+def get_history_thumbnail(item_dict, label_widget):
+    """
+    Fetch and display a compact 64×36 thumbnail for History items with:
+    1. Memory caching
+    2. Local file frame extraction via FFmpeg (for past & offline files on disk)
+    3. URL download & caching (for online artwork)
+    4. Clean fallback icon
+    """
+    if not PIL_AVAILABLE:
+        icon = "🎵" if "Audio" in item_dict.get("mode", "") else "🎬"
+        label_widget.configure(text=icon, font=("Segoe UI", 14), text_color=COL_MUTED, image=None)
+        return
+
+    thumb_url = item_dict.get("thumbnail", "")
+    file_path = item_dict.get("file_path", "")
+    title = item_dict.get("title", "")
+    mode = item_dict.get("mode", "Video")
+    cache_key = thumb_url or file_path or title or "item"
+
+    # 1. In-memory cache hit
+    if cache_key in _history_thumb_cache:
+        img = _history_thumb_cache[cache_key]
+        label_widget._img_ref = img
+        label_widget.configure(image=img, text="")
+        return
+
+    icon = "🎵" if "Audio" in mode else "🎬"
+    label_widget.configure(text=icon, font=("Segoe UI", 14), text_color=COL_MUTED, image=None)
+
+    def _async_process():
+        img = None
+        safe_key = "".join(c for c in cache_key if c.isalnum())[:32] or "thumb"
+        disk_cache_file = os.path.join(THUMBS_DIR, f"{safe_key}.jpg")
+
+        if os.path.isfile(disk_cache_file):
+            try:
+                with Image.open(disk_cache_file) as orig:
+                    img = orig.convert("RGB").copy()
+            except Exception:
+                img = None
+
+        # Try downloading remote URL
+        if img is None and thumb_url and str(thumb_url).startswith("http"):
+            try:
+                req = urllib.request.Request(
+                    thumb_url,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = resp.read()
+                with Image.open(io.BytesIO(data)) as orig:
+                    raw_img = orig.convert("RGB").copy()
+                w, h = raw_img.size
+                target = (w, int(w * 9 / 16))
+                if h > target[1]:
+                    top = (h - target[1]) // 2
+                    raw_img = raw_img.crop((0, top, w, top + target[1]))
+                img = raw_img.resize((64, 36), Image.LANCZOS)
+                try:
+                    img.save(disk_cache_file, format="JPEG", quality=85)
+                except Exception:
+                    pass
+            except Exception:
+                img = None
+
+        # If still no image, try extracting frame from local video file on disk
+        if img is None:
+            actual_file = file_path if (file_path and os.path.isfile(file_path)) else find_downloaded_file(title, mode)
+            if actual_file and os.path.isfile(actual_file) and not "Audio" in mode:
+                ffmpeg_exe = os.path.join(FFMPEG_DIR, "ffmpeg.exe") if os.path.isdir(FFMPEG_DIR) and os.path.isfile(os.path.join(FFMPEG_DIR, "ffmpeg.exe")) else "ffmpeg"
+                try:
+                    creationflags = 0x08000000 if os.name == 'nt' else 0
+                    cmd = [
+                        ffmpeg_exe, "-y",
+                        "-ss", "0.5",
+                        "-i", actual_file,
+                        "-vframes", "1",
+                        "-vf", "scale=64:36:force_original_aspect_ratio=increase,crop=64:36",
+                        "-q:v", "2",
+                        disk_cache_file
+                    ]
+                    proc = subprocess.run(cmd, capture_output=True, creationflags=creationflags)
+                    if proc.returncode == 0 and os.path.isfile(disk_cache_file):
+                        with Image.open(disk_cache_file) as orig:
+                            img = orig.convert("RGB").copy()
+                except Exception:
+                    img = None
+
+        if img is not None:
+            if img.size != (64, 36):
+                img = img.resize((64, 36), Image.LANCZOS)
+            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(64, 36))
+            _history_thumb_cache[cache_key] = ctk_img
+            
+            def _apply():
+                try:
+                    if label_widget.winfo_exists():
+                        label_widget._img_ref = ctk_img
+                        label_widget.configure(image=ctk_img, text="")
+                except Exception:
+                    pass
+            app.after(0, _apply)
+
+    threading.Thread(target=_async_process, daemon=True).start()
+
 def refresh_history_tab():
     if history_box_ref is None:
         return
@@ -1851,27 +1997,38 @@ def refresh_history_tab():
     for i, h in enumerate(display_history):
         real_idx = start_idx + i
         
-        frame = ctk.CTkFrame(history_box_ref, fg_color=COL_PANEL, corner_radius=6)
-        frame.pack(fill="x", pady=2, padx=6)
+        frame = ctk.CTkFrame(history_box_ref, fg_color=COL_PANEL, corner_radius=8)
+        frame.pack(fill="x", pady=3, padx=6)
         
         row = ctk.CTkFrame(frame, fg_color="transparent")
-        row.pack(fill="x", padx=6, pady=4)
+        row.pack(fill="x", padx=8, pady=5)
         
-        left = ctk.CTkFrame(row, fg_color="transparent", width=100, height=40)
+        # 1. Thumbnail preview
+        thumb_box = ctk.CTkFrame(row, fg_color=COL_DARK, width=68, height=40, corner_radius=6)
+        thumb_box.pack(side="left", padx=(2, 10))
+        thumb_box.pack_propagate(False)
+        thumb_lbl = ctk.CTkLabel(thumb_box, text="🎬", font=("Segoe UI", 14), text_color=COL_MUTED)
+        thumb_lbl.pack(expand=True)
+        get_history_thumbnail(h, thumb_lbl)
+        
+        # 2. Date & Mode
+        left = ctk.CTkFrame(row, fg_color="transparent", width=95, height=40)
         left.pack(side="left")
         left.pack_propagate(False)
-        ctk.CTkLabel(left, text=h.get('time', '—')[:10], font=("Segoe UI", 10), text_color=COL_MUTED).pack(anchor="w", pady=(0, 0))
+        ctk.CTkLabel(left, text=h.get('time', '—')[:10], font=("Segoe UI", 10), text_color=COL_MUTED).pack(anchor="w")
         ctk.CTkLabel(left, text=h.get('mode', '—').replace("-", " "), font=("Segoe UI", 11, "bold"), text_color=COL_ACCENT).pack(anchor="w")
         
+        # 3. Center (Title & Specs)
         center = ctk.CTkFrame(row, fg_color="transparent")
-        center.pack(side="left", fill="x", expand=True, padx=10)
+        center.pack(side="left", fill="x", expand=True, padx=8)
         title = h.get('title', '—')
-        if len(title) > 65: title = title[:62] + "..."
-        ctk.CTkLabel(center, text=title, font=("Segoe UI", 12), anchor="w").pack(fill="x")
+        if len(title) > 60: title = title[:58] + "..."
+        ctk.CTkLabel(center, text=title, font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x")
         
         info_str = f"{h.get('quality', '—')}  |  {h.get('file_type', '—')}"
         ctk.CTkLabel(center, text=info_str, font=("Consolas", 10), text_color=COL_MUTED, anchor="w").pack(fill="x", pady=(2, 0))
         
+        # 4. Right side actions
         right = ctk.CTkFrame(row, fg_color="transparent")
         right.pack(side="right")
         
@@ -3047,7 +3204,7 @@ for _si, (_sname, _sdomain, _scolor) in enumerate(SUPPORTED_SITES):
     _sites_grid.columnconfigure(_scol, weight=1)
     _badge = ctk.CTkFrame(_sites_grid, fg_color=COL_DARK, corner_radius=10)
     _badge.grid(row=_srow, column=_scol, padx=5, pady=5, sticky="ew")
-    # Logo label — starts as emoji globe, replaced async with real favicon
+    # Logo label — starts as emoji globe, replaced with real brand icon
     _logo_lbl = ctk.CTkLabel(
         _badge, text="🌐",
         font=("Segoe UI", 18), width=28, height=28,
@@ -3058,12 +3215,8 @@ for _si, (_sname, _sdomain, _scolor) in enumerate(SUPPORTED_SITES):
         font=("Segoe UI", 11, "bold"),
         text_color=COL_TEXT, anchor="w"
     ).pack(side="left", padx=(0, 10), pady=10)
-    # Kick off async logo fetch
-    threading.Thread(
-        target=_load_site_logo,
-        args=(_sdomain, _logo_lbl, _scolor),
-        daemon=True
-    ).start()
+    # Load site logo
+    _load_site_logo(_sdomain, _logo_lbl, _scolor)
 ctk.CTkLabel(
     websites_frame,
     text="...and 1,000+ more sites supported via yt-dlp",
@@ -3227,19 +3380,32 @@ ctk.CTkButton(frow, text="📂  Open Audio folder", width=200, height=38, font=B
               command=lambda: open_folder(AUD_DIR)).pack(side="left")
 
 make_divider(t8_scroll)
-make_section_label(t8_scroll, "Keyboard shortcuts")
-shortcuts_box = ctk.CTkTextbox(t8_scroll, height=80, state="normal",
-                                fg_color=COL_DARK, text_color=COL_MUTED,
-                                font=MONO_FONT)
-shortcuts_box.insert("1.0",
-    "  Ctrl + V   /   📋 button  →  Paste link  (works on any keyboard layout)\n"
-    "  Ctrl + S                  →  Start download  (from link entry fields)\n"
-    "  Escape                    →  Stop current download\n"
-    "  Drag & Drop               →  Drop .txt or link directly into any tab\n"
-    "  📋 button on batch box    →  Paste links from clipboard\n"
-    "  ✕  button on batch box    →  Clear all links")
-shortcuts_box.configure(state="disabled")
-shortcuts_box.pack(fill="x", padx=20, pady=4)
+make_section_label(t8_scroll, "Keyboard shortcuts & gestures")
+
+sc_card = ctk.CTkFrame(t8_scroll, fg_color=COL_PANEL, corner_radius=10)
+sc_card.pack(fill="x", padx=20, pady=(4, 10))
+
+SHORTCUTS = [
+    ("Ctrl + V", "Universal Paste", "Paste video/audio URL reliably on any keyboard layout (Arabic, French, etc.)", "📋"),
+    ("Ctrl + S", "Instant Download", "Start immediate download from any single URL entry field", "⬇"),
+    ("Escape", "Emergency Stop", "Abort and cancel all active downloads cleanly", "⏹"),
+    ("Drag & Drop", "Direct Drop Import", "Drop .txt link lists or URLs directly onto the window", "🎯"),
+    ("Enter", "Quick Check", "Analyze link size, duration, and thumbnail preview", "🔍"),
+    ("🧹 Clean", "Batch Deduplicator", "Remove duplicates, normalize URLs, and clean blank lines", "🧹"),
+]
+
+for key_combo, title_text, desc_text, icon in SHORTCUTS:
+    sc_row = ctk.CTkFrame(sc_card, fg_color="transparent")
+    sc_row.pack(fill="x", padx=14, pady=5)
+    
+    k_badge = ctk.CTkFrame(sc_row, fg_color=COL_DARK, corner_radius=6, height=28)
+    k_badge.pack(side="left", padx=(0, 12))
+    k_badge.pack_propagate(False)
+    ctk.CTkLabel(k_badge, text=f" {key_combo} ", font=("Consolas", 11, "bold"), text_color=COL_ACCENT).pack(padx=8, pady=3)
+    
+    ctk.CTkLabel(sc_row, text=f"{icon}  {title_text}", font=("Segoe UI", 11, "bold"), text_color=COL_TEXT).pack(side="left", padx=(0, 8))
+    ctk.CTkLabel(sc_row, text=f"—  {desc_text}", font=("Segoe UI", 11), text_color=COL_MUTED).pack(side="left", fill="x", expand=True, anchor="w")
+
 app.bind_all("<Escape>", lambda e: trigger_stop())
 
 make_divider(t8_scroll)
