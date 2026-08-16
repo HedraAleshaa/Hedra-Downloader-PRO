@@ -3,28 +3,104 @@
 # 🚀 Hedra Downloader PRO `2.0`
 **The Ultimate, Modern, and High-Performance Media Downloader for Windows**
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![yt--dlp](https://img.shields.io/badge/Engine-yt--dlp-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://github.com/yt-dlp/yt-dlp)
-[![FFmpeg](https://img.shields.io/badge/Processing-FFmpeg-007808?style=for-the-badge&logo=ffmpeg&logoColor=white)](https://ffmpeg.org/)
-[![CustomTkinter](https://img.shields.io/badge/UI-CustomTkinter-1f538d?style=for-the-badge)](https://github.com/TomSchimansky/CustomTkinter)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/HedraAleshaa/Hedra-Downloader-PRO/releases)
+[![Release](https://img.shields.io/badge/Release-v2.0%20Stable-34D399?style=for-the-badge&logo=github)](https://github.com/HedraAleshaa/Hedra-Downloader-PRO/releases)
+[![Engine](https://img.shields.io/badge/Engine-yt--dlp-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://github.com/yt-dlp/yt-dlp)
+[![Processing](https://img.shields.io/badge/Processing-FFmpeg-007808?style=for-the-badge&logo=ffmpeg&logoColor=white)](https://ffmpeg.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-38BDF8.svg?style=for-the-badge)](LICENSE)
 
 <p align="center">
-  <b>A sleek, user-friendly desktop application crafted to download videos, audios, clips, batches, and playlists with maximum quality and zero friction.</b>
+  <b>A sleek, user-friendly desktop application crafted to download videos, audios, batches, and playlists in pristine quality with zero technical knowledge required.</b>
 </p>
+
+[📥 Download Hedra Downloader PRO 2.0 (Windows)](https://github.com/HedraAleshaa/Hedra-Downloader-PRO/releases) • [✨ Features](#-why-hedra-downloader-pro) • [🍪 Cookie Guide](#-how-and-when-to-use-cookies) • [🌐 Supported Platforms](#-supported-websites-1000-platforms)
 
 ---
 
 </div>
 
-## ✨ Why Hedra Downloader PRO?
+## 🚀 Quick Start (For You & Friends)
 
-Hedra Downloader PRO combines the industry-leading extraction power of `yt-dlp` and `ffmpeg` with a handcrafted, modern desktop experience built from the ground up for simplicity and speed.
+**No Python, no terminal, and no coding required.** Anyone can use this in 3 simple steps:
+
+### 1️⃣ Download the App
+Go to the **[Latest Release Page](https://github.com/HedraAleshaa/Hedra-Downloader-PRO/releases)** and download:
+- 📦 **`Hedra-Downloader-PRO-v2.0-Windows.zip`** *(Recommended: Everything included, portable)*
+
+### 2️⃣ Extract & Open
+1. Right-click the downloaded `.zip` file and select **"Extract All…"**.
+2. Open the extracted folder and double-click:
+   ```text
+   Hedra Downloader PRO 2.0.exe
+   ```
+
+### 3️⃣ Download Any Media
+1. Copy any video, music, or playlist URL from your browser.
+2. Paste it into the app (`Ctrl + V`).
+3. Choose your desired quality and click **⬇ Download**!
+
+---
+
+## 🌐 Supported Websites (1,000+ Platforms)
+
+Hedra Downloader PRO natively extracts videos, audio, and reels from virtually any website on the internet:
+
+<div align="center">
+
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com)
+[![TikTok](https://img.shields.io/badge/TikTok-000000?style=for-the-badge&logo=tiktok&logoColor=white)](https://tiktok.com)
+[![Instagram](https://img.shields.io/badge/Instagram-E4405F?style=for-the-badge&logo=instagram&logoColor=white)](https://instagram.com)
+[![Facebook](https://img.shields.io/badge/Facebook-1877F2?style=for-the-badge&logo=facebook&logoColor=white)](https://facebook.com)
+[![X / Twitter](https://img.shields.io/badge/X_%2F_Twitter-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com)
+[![Twitch](https://img.shields.io/badge/Twitch-9146FF?style=for-the-badge&logo=twitch&logoColor=white)](https://twitch.tv)
+
+[![Reddit](https://img.shields.io/badge/Reddit-FF4500?style=for-the-badge&logo=reddit&logoColor=white)](https://reddit.com)
+[![SoundCloud](https://img.shields.io/badge/SoundCloud-FF3300?style=for-the-badge&logo=soundcloud&logoColor=white)](https://soundcloud.com)
+[![Vimeo](https://img.shields.io/badge/Vimeo-1AB7EA?style=for-the-badge&logo=vimeo&logoColor=white)](https://vimeo.com)
+[![Pinterest](https://img.shields.io/badge/Pinterest-BD081C?style=for-the-badge&logo=pinterest&logoColor=white)](https://pinterest.com)
+[![Dailymotion](https://img.shields.io/badge/Dailymotion-0066DC?style=for-the-badge&logo=dailymotion&logoColor=white)](https://dailymotion.com)
+[![Bilibili](https://img.shields.io/badge/Bilibili-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white)](https://bilibili.com)
+
+*...and 1,000+ additional streaming and media platforms powered by yt-dlp.*
+
+</div>
+
+---
+
+## 🍪 How and When to Use Cookies
+
+### 🤔 What are Cookies and why are they used?
+When you log into websites (like YouTube or Instagram) in your browser, the website gives your browser a small secure key called a **Cookie** so it remembers who you are.
+
+### ❓ When do you NEED Cookies?
+- 🔞 **Age-Restricted YouTube Videos**: Videos marked 18+ that require you to be signed in to watch.
+- 🔒 **Private / Member-Only Content**: Private Instagram accounts you follow, private Facebook group videos, or YouTube Member-only streams.
+- 🛡️ **Account Verification Checkpoints**: When a website asks for temporary bot verification.
+
+> [!NOTE]
+> **99% of normal public videos DO NOT require cookies.** If you're downloading standard public videos, you can skip this entirely!
+
+### 🛠️ How to Enable Cookies in 2 Easy Ways:
+
+#### Method 1: 1-Click Browser Auto-Detect (Easiest)
+1. Open the **Settings** tab in Hedra Downloader.
+2. Under **Cookies & Authentication**, check **"Enable Browser Cookies"**.
+3. Select the browser where you are logged in (*Chrome, Firefox, Edge, or Brave*).
+4. That's it! The downloader will automatically read your session securely.
+
+#### Method 2: Load a `cookies.txt` File
+1. Install a free, open-source browser extension like **"Get cookies.txt LOCALLY"** in Chrome or Firefox.
+2. Go to the website (e.g. `youtube.com`) and click the extension to export `cookies.txt`.
+3. In Hedra Downloader's **Settings** tab, choose **"Custom cookies.txt"** and select the exported file.
+
+---
+
+## ✨ Why Hedra Downloader PRO?
 
 <table>
   <tr>
     <td width="50%">
-      <h3>🔊 Audio Volume Booster & Silence Trimmer</h3>
+      <h3>🔊 Audio Booster & Silence Trimmer</h3>
       Boost quiet dialogues and audio tracks up to +12 dB with built-in DSP loudness normalization and smart silence trimming for both video and audio streams.
     </td>
     <td width="50%">
@@ -39,7 +115,7 @@ Hedra Downloader PRO combines the industry-leading extraction power of `yt-dlp` 
     </td>
     <td width="50%">
       <h3>💬 Smart Multilingual Subtitles</h3>
-      Choose your preferred language (English, Arabic, Spanish, French, German, Japanese, etc.) — the downloader automatically searches for official captions and seamlessly falls back to auto-generated transcripts.
+      Choose your preferred language (English, Arabic, Spanish, French, German, Japanese, etc.) — automatically embeds captions and cleans up temporary subtitle files.
     </td>
   </tr>
   <tr>
@@ -68,23 +144,6 @@ Hedra Downloader PRO combines the industry-leading extraction power of `yt-dlp` 
 | **🔒 Universal Paste** | Cross-layout keyboard fix ensures `Ctrl + V` works reliably across Arabic, French, and all language layouts. |
 | **🏷️ Metadata & Artwork** | Automatically embeds chapters, track descriptions, and cover artwork into media files. |
 | **🚫 SponsorBlock** | Optional integration to automatically strip sponsored segments, intros, and outros. |
-| **🍪 Cookie Integration** | Load `cookies.txt` or browser sessions (Chrome, Firefox, Edge, Brave) to bypass age gates and login checkpoints. |
-
----
-
-## 🌐 Supported Websites (1,000+ Platforms)
-
-Hedra Downloader PRO natively supports over 1,000 video and audio streaming sites, including:
-
-<div align="center">
-
-| YouTube | Facebook | Twitter / X | Instagram | TikTok | Twitch | Reddit | Vimeo | SoundCloud | Dailymotion |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 🔴 | 🔵 | ⚫ | 🟣 | ⬛ | 🟣 | 🟠 | 🔷 | 🔶 | 🔵 |
-
-*...and virtually every platform supported by the yt-dlp ecosystem.*
-
-</div>
 
 ---
 
@@ -101,28 +160,26 @@ Hedra Downloader PRO natively supports over 1,000 video and audio streaming site
 
 ---
 
-## 🚀 Quick Start
+<details>
+<summary><b>💻 Advanced: Run from Python Source (For Developers)</b></summary>
 
 ### Prerequisites
-- **Windows 10 / 11**
-- **Python 3.10+** (Ensure *"Add Python to PATH"* is checked during install)
+- **Python 3.10+** (Checked *"Add Python to PATH"*)
 
-### 1. Clone the Repository
+### Instructions:
 ```bash
+# 1. Clone repository
 git clone https://github.com/HedraAleshaa/Hedra-Downloader-PRO.git
 cd Hedra-Downloader-PRO
-```
 
-### 2. Install Dependencies
-```bash
+# 2. Install dependencies
 pip install -r requirements.txt
-```
 
-### 3. Launch Application
-```bash
+# 3. Launch application
 python "Hedra Downloader PRO.pyw"
 ```
-*(Or simply double-click `Hedra Downloader PRO.pyw` in Windows Explorer)*
+
+</details>
 
 ---
 
@@ -134,7 +191,7 @@ Hedra-Downloader-PRO/
 ├── ffmpeg.exe                  # Local high-performance FFmpeg binary
 ├── ffprobe.exe                 # Local FFprobe media inspection binary
 ├── requirements.txt            # Python dependencies (customtkinter, yt-dlp, pillow, mutagen)
-├── README.md                   # Documentation & Feature showcase
+├── README.md                   # Documentation & User guide
 └── LICENSE                     # Open Source MIT License
 ```
 
