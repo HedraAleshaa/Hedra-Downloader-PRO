@@ -3082,25 +3082,23 @@ _pal_outer.pack(fill="x", padx=20, pady=6)
 _pal_row = ctk.CTkFrame(_pal_outer, fg_color="transparent")
 _pal_row.pack(fill="x", padx=12, pady=10)
 
+_pal_cards_dict = {}
+
 def apply_palette(name):
-    """Save palette choice and restart the app for a clean re-render."""
+    """Save palette choice and apply live appearance mode instantly without restart."""
     global _ACTIVE_PALETTE
     _ACTIVE_PALETTE = name
+    p = PALETTES.get(name, PALETTES["Default"])
+    ctk.set_appearance_mode(p["appearance"])
     try:
         save_settings()
-        save_queue()
     except Exception:
         pass
     
-    clean_env = os.environ.copy()
-    clean_env.pop('_MEIPASS2', None)
-    clean_env.pop('_MEIPASS', None)
-
-    if getattr(sys, 'frozen', False):
-        subprocess.Popen([sys.executable], env=clean_env)
-    else:
-        subprocess.Popen([sys.executable] + sys.argv, env=clean_env)
-    os._exit(0)
+    for pname, pcard in _pal_cards_dict.items():
+        pcard.configure(border_width=2 if pname == name else 0)
+    
+    set_status(f"✔ Theme switched to {name}. Saved as default.", COL_SUCCESS, "Settings")
 
 _PAL_PREVIEWS = {
     "Default":   ("#38BDF8", "#0B0F19", "Sky blue / Midnight"),
@@ -3112,19 +3110,21 @@ for _pname, (_pacc, _pbg, _pdesc) in _PAL_PREVIEWS.items():
                          border_width=2 if _pname == _ACTIVE_PALETTE else 0,
                          border_color=_pacc)
     _card.pack(side="left", padx=8, pady=6, ipadx=10, ipady=8)
+    _pal_cards_dict[_pname] = _card
+    
     ctk.CTkLabel(_card, text=_pname, font=("Segoe UI", 12, "bold"),
                  text_color="#FFFFFF" if _pbg != "#F1F5F9" else "#0F172A").pack(padx=12, pady=(6, 2))
     ctk.CTkLabel(_card, text=_pdesc, font=("Segoe UI", 9),
                  text_color="#94A3B8" if _pbg != "#F1F5F9" else "#475569").pack(padx=12, pady=(0, 4))
     _dot = ctk.CTkFrame(_card, width=28, height=28, corner_radius=14, fg_color=_pacc)
     _dot.pack(pady=(0, 6))
-    ctk.CTkButton(_card, text="Apply & Restart", width=120, height=28, font=BTN_SUB,
+    ctk.CTkButton(_card, text="Apply Theme", width=120, height=28, font=BTN_SUB,
                   fg_color=_pacc if _pbg != "#F1F5F9" else "#2563EB",
                   hover_color="#555",
                   command=lambda n=_pname: apply_palette(n)
                   ).pack(pady=(0, 8), padx=12)
 
-ctk.CTkLabel(_pal_outer, text="* Theme changes require an instant restart to apply completely",
+ctk.CTkLabel(_pal_outer, text="* Theme switches live instantly and is saved as your default.",
              font=("Segoe UI", 11, "italic"), text_color=COL_MUTED).pack(pady=(0, 10))
 
 make_divider(t8_scroll)
