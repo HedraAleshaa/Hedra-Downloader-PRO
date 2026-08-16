@@ -266,6 +266,18 @@ app.geometry("950x700")
 app.minsize(800, 600)
 app.title(f"Hedra Downloader PRO {APP_VERSION}")
 
+# Window Icon
+_icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(), "icon.ico")
+if hasattr(sys, '_MEIPASS'):
+    _meipass_ico = os.path.join(sys._MEIPASS, "icon.ico")
+    if os.path.isfile(_meipass_ico):
+        _icon_path = _meipass_ico
+if os.path.isfile(_icon_path):
+    try:
+        app.iconbitmap(_icon_path)
+    except Exception:
+        pass
+
 # ==========================================
 #  GLOBAL STATE
 # ==========================================
@@ -3027,10 +3039,27 @@ t8_scroll.pack(fill="both", expand=True, padx=0, pady=0)
 make_section_label(t8_scroll, "About")
 about_frame = ctk.CTkFrame(t8_scroll, fg_color=COL_PANEL, corner_radius=10)
 about_frame.pack(fill="x", padx=20, pady=(4, 8))
+
+# Display App Logo in About Card
+_logo_png = os.path.join(os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(), "icon.png")
+if hasattr(sys, '_MEIPASS'):
+    _meipass_png = os.path.join(sys._MEIPASS, "icon.png")
+    if os.path.isfile(_meipass_png):
+        _logo_png = _meipass_png
+if PIL_AVAILABLE and os.path.isfile(_logo_png):
+    try:
+        with Image.open(_logo_png) as _lim:
+            _app_logo_ctk = ctk.CTkImage(light_image=_lim.copy(), dark_image=_lim.copy(), size=(64, 64))
+        _logo_img_lbl = ctk.CTkLabel(about_frame, image=_app_logo_ctk, text="")
+        _logo_img_lbl.image = _app_logo_ctk
+        _logo_img_lbl.pack(pady=(12, 0))
+    except Exception:
+        pass
+
 ctk.CTkLabel(about_frame,
-    text=f"Hedra Downloader ULTIMATE  {APP_VERSION}",
+    text=f"Hedra Downloader PRO {APP_VERSION}",
     font=("Segoe UI", 15, "bold"), text_color=COL_TEXT
-).pack(pady=(14, 2))
+).pack(pady=(4, 2))
 ctk.CTkLabel(about_frame,
     text=f"Made by  {APP_AUTHOR}",
     font=("Segoe UI", 12, "bold"), text_color=COL_ACCENT
@@ -3062,8 +3091,15 @@ def apply_palette(name):
         save_queue()
     except Exception:
         pass
-    python = sys.executable
-    subprocess.Popen([python] + sys.argv)
+    
+    clean_env = os.environ.copy()
+    clean_env.pop('_MEIPASS2', None)
+    clean_env.pop('_MEIPASS', None)
+
+    if getattr(sys, 'frozen', False):
+        subprocess.Popen([sys.executable], env=clean_env)
+    else:
+        subprocess.Popen([sys.executable] + sys.argv, env=clean_env)
     os._exit(0)
 
 _PAL_PREVIEWS = {
