@@ -10,6 +10,7 @@ import json
 import urllib.request
 import io
 import re
+import tkinter as tk
 from tkinter import messagebox
 import webbrowser
 
@@ -49,11 +50,16 @@ check_deps()
 #  SYSTEM SETUP & BUNDLING
 # ==========================================
 def get_ffmpeg_path():
-    if hasattr(sys, '_MEIPASS'):
+    if hasattr(sys, '_MEIPASS') and os.path.isfile(os.path.join(sys._MEIPASS, "ffmpeg.exe")):
         return sys._MEIPASS
-    return os.path.dirname(os.path.abspath(__file__))
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else (os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd())
+    if os.path.isfile(os.path.join(exe_dir, "ffmpeg.exe")):
+        return exe_dir
+    if os.path.isfile(os.path.join(os.getcwd(), "ffmpeg.exe")):
+        return os.getcwd()
+    return exe_dir
 
-APP_VERSION  = "V20"
+APP_VERSION  = "2.0"
 APP_AUTHOR   = "Hedra Aleshaa"
 FFMPEG_DIR   = get_ffmpeg_path()
 BASE_DIR     = os.path.join(os.path.expanduser("~"), "Downloads", "YT Downloader")
@@ -108,19 +114,19 @@ AUDIO_QUALITY_MAP = {
     "Low — Smallest file":    "9",
 }
 SUBTITLE_LANG_MAP = {
-    "English":                ["en.*", "en", "en-US", "en-GB"],
-    "Arabic (العربية)":       ["ar.*", "ar"],
-    "Spanish (Español)":      ["es.*", "es"],
-    "French (Français)":      ["fr.*", "fr"],
-    "German (Deutsch)":       ["de.*", "de"],
-    "Japanese (日本語)":       ["ja.*", "ja"],
-    "Chinese (中文)":         ["zh.*", "zh-Hans", "zh-Hant"],
-    "Portuguese (Português)": ["pt.*", "pt", "pt-BR"],
-    "Russian (Русский)":      ["ru.*", "ru"],
-    "Korean (한국어)":         ["ko.*", "ko"],
-    "Italian (Italiano)":     ["it.*", "it"],
-    "Turkish (Türkçe)":       ["tr.*", "tr"],
-    "Hindi (हिन्दी)":          ["hi.*", "hi"],
+    "English":                ["en", "en-US", "en-GB"],
+    "Arabic (العربية)":       ["ar"],
+    "Spanish (Español)":      ["es"],
+    "French (Français)":      ["fr"],
+    "German (Deutsch)":       ["de"],
+    "Japanese (日本語)":       ["ja"],
+    "Chinese (中文)":         ["zh", "zh-Hans", "zh-Hant"],
+    "Portuguese (Português)": ["pt", "pt-BR"],
+    "Russian (Русский)":      ["ru"],
+    "Korean (한국어)":         ["ko"],
+    "Italian (Italiano)":     ["it"],
+    "Turkish (Türkçe)":       ["tr"],
+    "Hindi (हिन्दी)":          ["hi"],
     "All Available Languages": ["all"],
 }
 SUBTITLE_MODES = [
@@ -258,7 +264,7 @@ MONO_FONT   = ("Consolas", 12)
 app = ctk.CTk()
 app.geometry("950x700")
 app.minsize(800, 600)
-app.title(f"Hedra Downloader ULTIMATE {APP_VERSION}")
+app.title(f"Hedra Downloader PRO {APP_VERSION}")
 
 # ==========================================
 #  GLOBAL STATE
@@ -508,13 +514,13 @@ def format_seconds_to_time(seconds):
 def get_audio_bitrate(q_var):
     return AUDIO_BITRATE_MAP.get(q_var.get(), 256)
 
-def extract_size_from_info(info, is_audio=False, audio_bitrate=None, seg_start=None, seg_end=None):
+def extract_size_from_info(info, is_audio=False, audio_bitrate=None):
     sz = 0
     if 'entries' in info:
         total = 0
         for entry in info['entries']:
             if entry:
-                total += extract_size_from_info(entry, is_audio, audio_bitrate, seg_start, seg_end)
+                total += extract_size_from_info(entry, is_audio, audio_bitrate)
         return total
     if is_audio and audio_bitrate and info.get('duration'):
         sz = int((audio_bitrate * 1000 * info['duration']) / 8)
@@ -525,14 +531,6 @@ def extract_size_from_info(info, is_audio=False, audio_bitrate=None, seg_start=N
             sz = info.get('filesize', 0) or info.get('filesize_approx', 0)
     else:
         sz = info.get('filesize', 0) or info.get('filesize_approx', 0)
-        
-    if sz and (seg_start is not None) and info.get('duration'):
-        duration = info.get('duration')
-        start = seg_start
-        end = seg_end if seg_end is not None else duration
-        if end > duration: end = duration
-        if end > start:
-            sz = int(sz * (end - start) / duration)
     return sz
 
 def normalize_media_url(url):
@@ -617,34 +615,6 @@ def parse_rate_limit(text):
             return int(float(text[:-1]) * 1024)
         return int(text)
     except ValueError:
-        return None
-
-def parse_timestamp(text):
-    """Convert hh:mm:ss, mm:ss, raw seconds, or '2m 30s' string to float seconds."""
-    if text is None:
-        return None
-    text = str(text).strip().lower()
-    if not text:
-        return None
-    
-    if re.search(r'[hms]', text):
-        total = 0.0
-        h = re.search(r'(\d+)\s*h', text)
-        m = re.search(r'(\d+)\s*m', text)
-        s = re.search(r'(\d+(?:\.\d+)?)\s*s', text)
-        if h: total += int(h.group(1)) * 3600
-        if m: total += int(m.group(1)) * 60
-        if s: total += float(s.group(1))
-        return float(total)
-
-    parts = text.split(":")
-    try:
-        if len(parts) == 3:
-            return float(int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2]))
-        elif len(parts) == 2:
-            return float(int(parts[0]) * 60 + float(parts[1]))
-        return float(text)
-    except (ValueError, IndexError):
         return None
 
 # ==========================================
@@ -1000,8 +970,7 @@ def get_global_opts():
 #  OPTION BUILDERS
 # ==========================================
 def get_video_opts(q_var, sub_var, fmt_var, target_dir,
-                   for_analysis=False, items_list=None,
-                   seg_start=None, seg_end=None):
+                   for_analysis=False, items_list=None):
     fmt        = VIDEO_QUALITY_MAP.get(q_var.get(), "bestvideo+bestaudio/best")
     fmt_choice = fmt_var.get()
 
@@ -1030,10 +999,11 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
         
         sub_choice = sub_var.get() if sub_var else "None"
         if sub_choice not in ("None", "[MKV Required]"):
-            lang_codes = SUBTITLE_LANG_MAP.get(sub_choice, ["en.*", "en"])
+            lang_codes = SUBTITLE_LANG_MAP.get(sub_choice, ["en"])
             opts['writesubtitles'] = True
             opts['writeautomaticsub'] = True
             opts['subtitleslangs'] = lang_codes
+            opts['ignoreerrors'] = 'only_download'
                 
             sub_mode = global_sub_mode_var.get() if 'global_sub_mode_var' in globals() else "Embed in Video"
             
@@ -1051,7 +1021,8 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
                 elif fmt_choice == "mp4":
                     opts['merge_output_format'] = 'mp4'
             else:  # "Embed in Video"
-                postprocessors.append({'key': 'FFmpegEmbedSubtitle'})
+                postprocessors.append({'key': 'FFmpegSubtitlesConvertor', 'format': 'srt'})
+                postprocessors.append({'key': 'FFmpegEmbedSubtitle', 'already_have_subtitle': False})
                 if fmt_choice == "mkv":
                     opts['merge_output_format'] = 'mkv'
                 elif fmt_choice == "mp4":
@@ -1072,8 +1043,7 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
     return opts
 
 def get_audio_opts(q_var, fmt_var, target_dir,
-                   for_analysis=False, items_list=None,
-                   seg_start=None, seg_end=None):
+                   for_analysis=False, items_list=None):
     aq_label   = q_var.get()
     aq         = AUDIO_QUALITY_MAP.get(aq_label, "0")
     fmt_choice = fmt_var.get()
@@ -1215,13 +1185,41 @@ def update_queue_ui_periodic():
     _draw_speed_graph()
     app.after(500, update_queue_ui_periodic)
 
+queue_search_var = None
+queue_filter_var = None
+
 def refresh_queue_tab():
     if queue_box_ref is None: return
     for w in queue_box_ref.winfo_children(): w.destroy()
     if not global_queue.jobs:
         ctk.CTkLabel(queue_box_ref, text="Queue is empty.", text_color=COL_MUTED).pack(pady=20)
         return
-    for job in global_queue.jobs:
+        
+    s_term = queue_search_var.get().strip().lower() if queue_search_var else ""
+    s_filter = queue_filter_var.get() if queue_filter_var else "All"
+    
+    filtered_jobs = []
+    for j in global_queue.jobs:
+        if s_filter == "Active" and j.get("status") not in ["Pending", "Downloading"]:
+            continue
+        elif s_filter == "Paused" and j.get("status") != "Paused":
+            continue
+        elif s_filter == "Done" and j.get("status") != "Completed":
+            continue
+        elif s_filter == "Error" and j.get("status") not in ["Error", "Cancelled"]:
+            continue
+            
+        if s_term:
+            combined = f"{j.get('hint','')} {j.get('mode','')} {j.get('quality','')} {j.get('file_type','')} {j.get('status','')}".lower()
+            if s_term not in combined:
+                continue
+        filtered_jobs.append(j)
+        
+    if not filtered_jobs:
+        ctk.CTkLabel(queue_box_ref, text="No jobs matching your filter.", text_color=COL_MUTED).pack(pady=20)
+        return
+        
+    for job in filtered_jobs:
         f = ctk.CTkFrame(queue_box_ref, fg_color=COL_PANEL, corner_radius=6)
         f.pack(fill="x", pady=4, padx=6)
         
@@ -1232,7 +1230,12 @@ def refresh_queue_tab():
         if len(title) > 65: title = title[:62] + "..."
         ctk.CTkLabel(left, text=title, font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x")
         
-        info_str = f"Size: {job.get('size', 'Unknown')}  |  {job.get('quality', '—')}  |  {job.get('file_type', '—')}"
+        info_parts = [f"Size: {job.get('size', 'Unknown')}", job.get('quality', '—'), job.get('file_type', '—')]
+        if job.get('volume_boost') and "+" in job.get('volume_boost'):
+            info_parts.append(f"🔊 {job.get('volume_boost')}")
+        if job.get('trim_silence'):
+            info_parts.append("✂ Trimmed")
+        info_str = "  |  ".join(info_parts)
         ctk.CTkLabel(left, text=info_str, font=("Consolas", 10), text_color=COL_MUTED, anchor="w").pack(fill="x")
         
         status_lbl = ctk.CTkLabel(left, text=f"{job['status']}  |  {job.get('progress_text', '')}", font=("Segoe UI", 11), anchor="w")
@@ -1266,7 +1269,7 @@ class JobQueue:
         self.worker_threads = {}
         self.queue_cancel = threading.Event()
         
-    def add(self, opts, links, folder_name, mode, hint, tab, size="Unknown", quality="—", file_type="—", start_paused=False, seg_start=None, seg_end=None):
+    def add(self, opts, links, folder_name, mode, hint, tab, size="Unknown", quality="—", file_type="—", start_paused=False, volume_boost="Normal (0 dB)", trim_silence=False):
         cancel_event.clear()
         self.queue_cancel.clear()
         cleaned_links = [normalize_media_url(l) for l in links if l and str(l).strip()]
@@ -1283,8 +1286,8 @@ class JobQueue:
             "file_type": file_type,
             "status": "Paused" if start_paused else "Pending",
             "progress_text": "Paused" if start_paused else "Waiting in queue...",
-            "seg_start": seg_start,
-            "seg_end": seg_end,
+            "volume_boost": volume_boost,
+            "trim_silence": trim_silence,
         }
         self.jobs.append(job)
         app.after(0, refresh_queue_tab)
@@ -1410,74 +1413,130 @@ class JobQueue:
             with yt_dlp.YoutubeDL(opts_copy) as ydl:
                 for link in job["links"]:
                     if job_cancel and job_cancel.is_set(): raise ValueError("PROCESS_CANCELLED")
-                    info = ydl.extract_info(link, download=True)
-                    if info:
-                        t_hint = job["hint"] or link
-                        title, _ = extract_better_metadata(info, t_hint)
-                        sz = extract_size_from_info(info, "Audio" in job["mode"])
-                        if sz: sz_str = format_size(sz)
-                        elif _last_downloading_size != "Unknown": sz_str = _last_downloading_size
-                        else: sz_str = job.get("size", "—")
+                    
+                    t_hint = job["hint"] or link
+                    expected_fpath = ""
+                    pre_info = None
+                    try:
+                        pre_info = ydl.extract_info(link, download=False)
+                        if pre_info:
+                            t_hint, _ = extract_better_metadata(pre_info, t_hint)
+                            expected_fpath = ydl.prepare_filename(pre_info)
+                    except Exception:
+                        pass
+
+                    info = None
+                    try:
+                        info = ydl.extract_info(link, download=True)
+                    except Exception as dl_err:
+                        found_file = ""
+                        if expected_fpath and os.path.isfile(expected_fpath) and os.path.getsize(expected_fpath) > 1024:
+                            found_file = expected_fpath
+                        else:
+                            tgt_dir = job.get("target_dir") or (AUD_DIR if "Audio" in job.get("mode", "") else VID_DIR)
+                            if os.path.isdir(tgt_dir):
+                                candidates = [os.path.join(tgt_dir, f) for f in os.listdir(tgt_dir)
+                                              if not f.endswith(('.part', '.ytdl', '.vtt', '.srt', '.aria2', '.temp'))]
+                                if candidates:
+                                    latest = max(candidates, key=os.path.getmtime)
+                                    if time.time() - os.path.getmtime(latest) < 180 and os.path.getsize(latest) > 1024:
+                                        found_file = latest
                         
-                        if job["hint"] == link or job["hint"] == "Link 1":
-                            job["hint"] = title
+                        if found_file:
+                            fpath = found_file
+                            info = pre_info or {"title": t_hint, "_filename": fpath}
+                        else:
+                            raise dl_err
                             
-                        # Extract downloaded output file path on disk
-                        fpath = info.get('_filename') or info.get('filename') or ""
-                        if not fpath and 'requested_downloads' in info and info['requested_downloads']:
-                            fpath = info['requested_downloads'][0].get('filepath') or ""
-                        if not fpath:
-                            try: fpath = ydl.prepare_filename(info)
-                            except Exception: pass
+                    if not info and pre_info:
+                        info = pre_info
+                    if not info:
+                        info = {"title": t_hint}
+                        
+                    t_hint = job["hint"] or link
+                    title, _ = extract_better_metadata(info, t_hint)
+                    sz = extract_size_from_info(info, "Audio" in job["mode"])
+                    if sz: sz_str = format_size(sz)
+                    elif _last_downloading_size != "Unknown": sz_str = _last_downloading_size
+                    else: sz_str = job.get("size", "—")
+                    
+                    if job["hint"] == link or job["hint"] == "Link 1":
+                        job["hint"] = title
+                        
+                    # Extract downloaded output file path on disk
+                    fpath = info.get('_filename') or info.get('filename') or expected_fpath or ""
+                    if not fpath and 'requested_downloads' in info and info['requested_downloads']:
+                        fpath = info['requested_downloads'][0].get('filepath') or ""
+                    if not fpath:
+                        try: fpath = ydl.prepare_filename(info)
+                        except Exception: pass
+                    if not fpath or not os.path.isfile(fpath):
+                        tgt_dir = job.get("target_dir") or (AUD_DIR if "Audio" in job.get("mode", "") else VID_DIR)
+                        if os.path.isdir(tgt_dir):
+                            candidates = [os.path.join(tgt_dir, f) for f in os.listdir(tgt_dir)
+                                          if not f.endswith(('.part', '.ytdl', '.vtt', '.srt', '.aria2', '.temp'))]
+                            if candidates:
+                                latest = max(candidates, key=os.path.getmtime)
+                                if time.time() - os.path.getmtime(latest) < 180 and os.path.getsize(latest) > 1024:
+                                    fpath = latest
                             
-                        # Reconstructed High-Precision Segment Trimming
-                        seg_s = job.get("seg_start")
-                        seg_e = job.get("seg_end")
-                        if fpath and os.path.isfile(fpath) and (seg_s is not None or seg_e is not None):
-                            app.after(0, lambda: set_status(f"✂ Trimming clip: {job['hint']}", COL_ACCENT, job["tab"]))
-                            job["progress_text"] = "Trimming clip..."
-                            app.after(0, refresh_queue_tab)
+                    # Common FFmpeg environment
+                    ffmpeg_exe = os.path.join(FFMPEG_DIR, "ffmpeg.exe") if os.path.isdir(FFMPEG_DIR) and os.path.isfile(os.path.join(FFMPEG_DIR, "ffmpeg.exe")) else "ffmpeg"
+                    creationflags = 0x08000000 if os.name == 'nt' else 0
+
+                    # 🔊 Audio Volume Booster & Silence Trimmer (Video & Audio)
+                    vol_boost = job.get("volume_boost", "Normal (0 dB)")
+                    trim_silence = job.get("trim_silence", False)
+                    if fpath and os.path.isfile(fpath) and (("+" in vol_boost) or trim_silence):
+                        try:
+                            af_filters = []
+                            if "+" in vol_boost:
+                                db_val = vol_boost.split()[0].replace("+", "")
+                                af_filters.append(f"volume={db_val}")
+                            if trim_silence:
+                                af_filters.append("silenceremove=start_periods=1:start_duration=0.3:start_threshold=-45dB:stop_periods=1:stop_duration=0.3:stop_threshold=-45dB")
                             
-                            fdir, fname = os.path.split(fpath)
-                            fbase, fext = os.path.splitext(fname)
-                            temp_cut = os.path.join(fdir, f"{fbase}_temp_clip{fext}")
-                            ffmpeg_exe = os.path.join(FFMPEG_DIR, "ffmpeg.exe") if os.path.isdir(FFMPEG_DIR) and os.path.isfile(os.path.join(FFMPEG_DIR, "ffmpeg.exe")) else "ffmpeg"
-                            
-                            cmd = [ffmpeg_exe, "-y"]
-                            if seg_s is not None and seg_s > 0:
-                                cmd.extend(["-ss", str(seg_s)])
-                            if seg_e is not None and seg_e > 0:
-                                cmd.extend(["-to", str(seg_e)])
-                            cmd.extend(["-i", fpath, "-map", "0"])
-                            
-                            is_audio_mode = "Audio" in job.get("mode", "")
-                            if is_audio_mode:
-                                cmd.extend(["-c:a", "copy", "-avoid_negative_ts", "make_zero", "-reset_timestamps", "1", temp_cut])
-                            else:
-                                cmd.extend(["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                                            "-c:a", "aac", "-b:a", "192k",
-                                            "-avoid_negative_ts", "make_zero", "-reset_timestamps", "1",
-                                            "-movflags", "+faststart", temp_cut])
-                                            
-                            creationflags = 0x08000000 if os.name == 'nt' else 0
-                            proc = subprocess.run(cmd, capture_output=True, creationflags=creationflags)
-                            
-                            if proc.returncode != 0:
-                                cmd_fb = [ffmpeg_exe, "-y"]
-                                if seg_s is not None and seg_s > 0: cmd_fb.extend(["-ss", str(seg_s)])
-                                if seg_e is not None and seg_e > 0: cmd_fb.extend(["-to", str(seg_e)])
-                                cmd_fb.extend(["-i", fpath, "-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero", "-reset_timestamps", "1", temp_cut])
-                                proc = subprocess.run(cmd_fb, capture_output=True, creationflags=creationflags)
+                            if af_filters:
+                                app.after(0, lambda: set_status(f"🔊 Enhancing audio: {job['hint']}", COL_ACCENT, job["tab"]))
+                                job["progress_text"] = "Enhancing audio..."
+                                app.after(0, refresh_queue_tab)
                                 
-                            if proc.returncode == 0 and os.path.isfile(temp_cut) and os.path.getsize(temp_cut) > 0:
-                                try:
+                                filter_str = ",".join(af_filters)
+                                fdir, fname = os.path.split(fpath)
+                                fbase, fext = os.path.splitext(fname)
+                                temp_aud = os.path.join(fdir, f"{fbase}_temp_enhanced{fext}")
+                                
+                                is_aud = "Audio" in job.get("mode", "")
+                                if is_aud:
+                                    aud_cmd = [ffmpeg_exe, "-y", "-i", fpath, "-af", filter_str, temp_aud]
+                                else:
+                                    aud_cmd = [ffmpeg_exe, "-y", "-i", fpath, "-c:v", "copy", "-af", filter_str, "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", temp_aud]
+                                
+                                a_proc = subprocess.run(aud_cmd, capture_output=True, creationflags=creationflags)
+                                if a_proc.returncode == 0 and os.path.isfile(temp_aud) and os.path.getsize(temp_aud) > 0:
                                     os.remove(fpath)
-                                    os.replace(temp_cut, fpath)
+                                    os.replace(temp_aud, fpath)
                                     sz_str = format_size(os.path.getsize(fpath))
-                                except Exception:
-                                    pass
-                            
-                        save_history_entry(title, link, job["mode"], sz_str, job.get("quality", "—"), job.get("file_type", "—"), file_path=fpath, thumbnail=best_thumb)
+                        except Exception:
+                            pass
+
+                    # Clean up any leftover subtitle files if mode was Embed in Video
+                    try:
+                        sub_m = global_sub_mode_var.get() if 'global_sub_mode_var' in globals() else "Embed in Video"
+                        if "Embed in Video" in sub_m and fpath and os.path.isfile(fpath):
+                            fdir, fname = os.path.split(fpath)
+                            fbase, _ = os.path.splitext(fname)
+                            for sub_f in os.listdir(fdir):
+                                if sub_f.startswith(fbase) and (sub_f.endswith('.srt') or sub_f.endswith('.vtt') or sub_f.endswith('.ass')):
+                                    try:
+                                        os.remove(os.path.join(fdir, sub_f))
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+                        
+                    best_thumb = info.get("thumbnail") if isinstance(info, dict) else ""
+                    save_history_entry(title, link, job["mode"], sz_str, job.get("quality", "—"), job.get("file_type", "—"), file_path=fpath, thumbnail=best_thumb)
             
             app.after(0, _increment_session_counter)
             app.after(0, lambda: set_status(f"✔ Completed: {job['hint']}", COL_SUCCESS, job["tab"]))
@@ -1541,8 +1600,6 @@ def save_queue():
             "size": j["size"],
             "quality": j["quality"],
             "file_type": j["file_type"],
-            "seg_start": j.get("seg_start"),
-            "seg_end": j.get("seg_end"),
             "status": "Paused"
         })
     try:
@@ -1556,11 +1613,7 @@ def load_queue():
         with open(QUEUE_FILE, "r", encoding="utf-8") as f:
             jobs_data = json.load(f)
         for jd in jobs_data:
-            s = jd.get("seg_start")
-            e = jd.get("seg_end")
-            if s is not None:
-                jd["opts"]["download_ranges"] = yt_dlp.utils.download_range_func(None, [(s, e if e is not None else float('inf'))])
-            global_queue.add(jd["opts"], jd["links"], jd["folder_name"], jd["mode"], jd["hint"], jd["tab"], jd["size"], jd["quality"], jd["file_type"], start_paused=True, seg_start=s, seg_end=e)
+            global_queue.add(jd["opts"], jd["links"], jd["folder_name"], jd["mode"], jd["hint"], jd["tab"], jd["size"], jd["quality"], jd["file_type"], start_paused=True)
         os.remove(QUEUE_FILE)
     except: pass
 
@@ -1570,11 +1623,11 @@ def load_queue():
 #  DOWNLOAD RUNNER
 # ==========================================
 def run_download_thread(ydl_opts, links, folder_name,
-                        mode="Video", title_hint="", tab=None, size="Unknown", quality="—", file_type="—", start_paused=False, seg_start=None, seg_end=None):
+                        mode="Video", title_hint="", tab=None, size="Unknown", quality="—", file_type="—", start_paused=False, volume_boost="Normal (0 dB)", trim_silence=False):
     if not links or not any(l.strip() for l in links):
         set_status("⚠  No links to download.", COL_WARN, tab)
         return
-    global_queue.add(ydl_opts, [l.strip() for l in links if l.strip()], folder_name, mode, title_hint, tab, size, quality, file_type, start_paused, seg_start, seg_end)
+    global_queue.add(ydl_opts, [l.strip() for l in links if l.strip()], folder_name, mode, title_hint, tab, size, quality, file_type, start_paused, volume_boost, trim_silence)
 
 
 # ==========================================
@@ -1582,8 +1635,7 @@ def run_download_thread(ydl_opts, links, folder_name,
 # ==========================================
 def execute_standard_analysis(opts, links, info_box,
                                is_audio=False, audio_bitrate=None,
-                               tab=None, thumb_label=None, stale_banner=None,
-                               seg_start=None, seg_end=None):
+                               tab=None, thumb_label=None, stale_banner=None):
     if not links:
         update_info_box(info_box, "⚠  Please paste link(s) first.", COL_WARN)
         return
@@ -1614,7 +1666,7 @@ def execute_standard_analysis(opts, links, info_box,
                         raise ValueError("PROCESS_CANCELLED")
                     try:
                         info       = ydl.extract_info(link, download=False)
-                        size_bytes = extract_size_from_info(info, is_audio, audio_bitrate, seg_start, seg_end)
+                        size_bytes = extract_size_from_info(info, is_audio, audio_bitrate)
                         total_bytes += size_bytes
                         successful  += 1
                         best_title, best_thumb = extract_better_metadata(info, f'Link {i+1}')
@@ -1622,16 +1674,6 @@ def execute_standard_analysis(opts, links, info_box,
                         title_str   = title
                         if i == 0:
                             thumb_url = best_thumb
-                            dur = info.get('duration')
-                            if dur:
-                                if tab == "Single Video" and 'vid_seg_start' in globals() and hasattr(vid_seg_start, "_set_duration"):
-                                    app.after(0, lambda d=dur: vid_seg_start._set_duration(d))
-                                elif tab == "Single Audio" and 'aud_seg_start' in globals() and hasattr(aud_seg_start, "_set_duration"):
-                                    app.after(0, lambda d=dur: aud_seg_start._set_duration(d))
-                                elif tab == "Batch Video" and 'bvid_seg_start' in globals() and hasattr(bvid_seg_start, "_set_duration"):
-                                    app.after(0, lambda d=dur: bvid_seg_start._set_duration(d))
-                                elif tab == "Batch Audio" and 'baud_seg_start' in globals() and hasattr(baud_seg_start, "_set_duration"):
-                                    app.after(0, lambda d=dur: baud_seg_start._set_duration(d))
                         if len(title) > 65:
                             title = title[:62] + "…"
                         details.append(f"[{format_size(size_bytes):>12}]  {title}")
@@ -1686,7 +1728,7 @@ def execute_standard_analysis(opts, links, info_box,
 def analyze_playlist(opts, link, scroll_frame, checkbox_state_list,
                      dynamic_label, stale_banner,
                      is_audio=False, audio_bitrate=None, tab=None,
-                     thumb_label=None, seg_start=None, seg_end=None):
+                     thumb_label=None):
     cleaned_link = normalize_media_url(link)
     if not cleaned_link:
         set_status("⚠  Paste a playlist link first.", COL_WARN, tab)
@@ -1737,7 +1779,7 @@ def analyze_playlist(opts, link, scroll_frame, checkbox_state_list,
                             show_thumbnail(thumb_url, thumb_label)
                         first_thumb_shown = True
                     title, _ = extract_better_metadata(entry, f"Video {i+1}")
-                    size_bytes = extract_size_from_info(entry, is_audio, audio_bitrate, seg_start, seg_end)
+                    size_bytes = extract_size_from_info(entry, is_audio, audio_bitrate)
                     valid_count += 1
                     idx          = i + 1
                     # Live counter update in status bar while entries load
@@ -1777,7 +1819,8 @@ def analyze_playlist(opts, link, scroll_frame, checkbox_state_list,
 #  PLAYLIST DOWNLOAD STARTER
 # ==========================================
 def start_playlist_download(q_var, sub_var, fmt_var, target_dir,
-                             link, checkbox_state_list, is_video, tab=None, start_paused=False):
+                             link, checkbox_state_list, is_video, tab=None, start_paused=False,
+                             volume_boost="Normal (0 dB)", trim_silence=False):
     cleaned_link = normalize_media_url(link)
     selected = [str(idx) for idx, var, _, _ in checkbox_state_list if var.get() == 1]
     if not selected:
@@ -1799,7 +1842,8 @@ def start_playlist_download(q_var, sub_var, fmt_var, target_dir,
         
     run_download_thread(opts, [cleaned_link], "Playlists",
                         "Playlist-Video" if is_video else "Playlist-Audio",
-                        job_hint, tab, size, q_var.get(), fmt_var.get(), start_paused)
+                        job_hint, tab, size, q_var.get(), fmt_var.get() if fmt_var else "—", start_paused,
+                        volume_boost=volume_boost, trim_silence=trim_silence)
 
 # ==========================================
 #  DYNAMIC PLAYLIST SIZE ENGINE
@@ -1976,9 +2020,15 @@ def get_history_thumbnail(item_dict, label_widget):
                         label_widget.configure(image=ctk_img, text="")
                 except Exception:
                     pass
-            app.after(0, _apply)
+            try:
+                app.after(0, _apply)
+            except Exception:
+                pass
 
     threading.Thread(target=_async_process, daemon=True).start()
+
+hist_search_var = None
+hist_filter_var = None
 
 def refresh_history_tab():
     if history_box_ref is None:
@@ -1991,12 +2041,30 @@ def refresh_history_tab():
         ctk.CTkLabel(history_box_ref, text="No downloads recorded yet.", text_color=COL_MUTED).pack(pady=20)
         return
         
+    s_term = hist_search_var.get().strip().lower() if hist_search_var else ""
+    s_filter = hist_filter_var.get() if hist_filter_var else "All"
+    
     start_idx = max(0, len(history) - 200)
     display_history = history[start_idx:]
     
+    filtered_items = []
     for i, h in enumerate(display_history):
         real_idx = start_idx + i
+        if s_filter == "Video" and not ("Video" in h.get("mode", "")):
+            continue
+        if s_filter == "Audio" and not ("Audio" in h.get("mode", "")):
+            continue
+        if s_term:
+            combined = f"{h.get('title','')} {h.get('url','')} {h.get('mode','')} {h.get('quality','')} {h.get('file_type','')} {h.get('size','')}".lower()
+            if s_term not in combined:
+                continue
+        filtered_items.append((real_idx, h))
         
+    if not filtered_items:
+        ctk.CTkLabel(history_box_ref, text="No downloads matching your search.", text_color=COL_MUTED).pack(pady=20)
+        return
+        
+    for real_idx, h in filtered_items:
         frame = ctk.CTkFrame(history_box_ref, fg_color=COL_PANEL, corner_radius=8)
         frame.pack(fill="x", pady=3, padx=6)
         
@@ -2232,6 +2300,8 @@ def create_vid_options(parent):
     q_var = ctk.StringVar(value="Best Available")
     fmt_var = ctk.StringVar(value="Default")
     s_var = ctk.StringVar(value="None")
+    vol_boost_var = ctk.StringVar(value="Normal (0 dB)")
+    silence_trim_var = ctk.BooleanVar(value=False)
 
     def _set_vid_preset(q_val, f_val):
         q_var.set(q_val)
@@ -2250,26 +2320,38 @@ def create_vid_options(parent):
             command=lambda q=q_target, f=f_target: _set_vid_preset(q, f)
         ).pack(side="left", padx=2)
 
-    # Row 1: Quality | File Type | Subtitles
+    # Row 1: Quality | Format | Subtitles
     row1 = ctk.CTkFrame(frame, fg_color="transparent")
-    row1.pack(fill="x", padx=12, pady=(4, 8))
+    row1.pack(fill="x", padx=12, pady=(3, 2))
 
-    ctk.CTkLabel(row1, text="Quality:", font=LABEL_FONT).pack(side="left", padx=(0, 5))
-    ctk.CTkOptionMenu(row1, variable=q_var, width=135,
-                      values=list(VIDEO_QUALITY_MAP.keys())).pack(side="left", padx=(0, 12))
+    ctk.CTkLabel(row1, text="Quality:", font=LABEL_FONT).pack(side="left", padx=(0, 4))
+    ctk.CTkOptionMenu(row1, variable=q_var, width=125,
+                      values=list(VIDEO_QUALITY_MAP.keys())).pack(side="left", padx=(0, 10))
 
-    ctk.CTkLabel(row1, text="File Type:", font=LABEL_FONT).pack(side="left", padx=(0, 5))
-    fmt_menu = ctk.CTkOptionMenu(row1, variable=fmt_var, width=80,
+    ctk.CTkLabel(row1, text="Format:", font=LABEL_FONT).pack(side="left", padx=(0, 4))
+    fmt_menu = ctk.CTkOptionMenu(row1, variable=fmt_var, width=75,
                                  values=["Default", "mp4", "mkv"])
-    fmt_menu.pack(side="left", padx=(0, 12))
+    fmt_menu.pack(side="left", padx=(0, 10))
 
-    ctk.CTkLabel(row1, text="Subtitles:", font=LABEL_FONT).pack(side="left", padx=(0, 5))
+    ctk.CTkLabel(row1, text="Subtitles:", font=LABEL_FONT).pack(side="left", padx=(0, 4))
     s_menu = ctk.CTkOptionMenu(
-        row1, variable=s_var, width=200,
+        row1, variable=s_var, width=155,
         values=["None"] + list(SUBTITLE_LANG_MAP.keys()))
     s_menu.pack(side="left")
 
-    return q_var, s_var, fmt_var
+    # Row 2: Volume Boost | Silence Trimmer
+    row2 = ctk.CTkFrame(frame, fg_color="transparent")
+    row2.pack(fill="x", padx=12, pady=(2, 6))
+
+    ctk.CTkLabel(row2, text="🔊 Boost:", font=LABEL_FONT).pack(side="left", padx=(0, 4))
+    ctk.CTkOptionMenu(
+        row2, variable=vol_boost_var, width=120,
+        values=["Normal (0 dB)", "+3 dB (Gentle)", "+6 dB (Medium)", "+9 dB (Strong)", "+12 dB (Max)"]
+    ).pack(side="left", padx=(0, 10))
+
+    ctk.CTkCheckBox(row2, text="✂ Trim Silence", variable=silence_trim_var, font=("Segoe UI", 11)).pack(side="left")
+
+    return q_var, s_var, fmt_var, vol_boost_var, silence_trim_var
 
 def create_aud_options(parent):
     frame = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=8)
@@ -2282,6 +2364,8 @@ def create_aud_options(parent):
 
     q_var = ctk.StringVar(value="Best — Highest bitrate")
     fmt_var = ctk.StringVar(value="mp3")
+    vol_boost_var = ctk.StringVar(value="Normal (0 dB)")
+    silence_trim_var = ctk.BooleanVar(value=False)
 
     def _set_aud_preset(q_val, f_val):
         q_var.set(q_val)
@@ -2300,15 +2384,31 @@ def create_aud_options(parent):
             command=lambda q=q_target, f=f_target: _set_aud_preset(q, f)
         ).pack(side="left", padx=2)
 
-    row = ctk.CTkFrame(frame, fg_color="transparent")
-    row.pack(fill="x", padx=12, pady=(4, 8))
-    ctk.CTkLabel(row, text="Quality:", font=LABEL_FONT).pack(side="left", padx=(0, 5))
-    ctk.CTkOptionMenu(row, variable=q_var, width=200,
-                      values=list(AUDIO_BITRATE_MAP.keys())).pack(side="left", padx=(0, 18))
-    ctk.CTkLabel(row, text="Format:", font=LABEL_FONT).pack(side="left", padx=(0, 5))
-    ctk.CTkOptionMenu(row, variable=fmt_var, width=90,
-                      values=["mp3", "flac", "wav", "m4a"]).pack(side="left")
-    return q_var, fmt_var
+    # Row 1: Quality | Format
+    row1 = ctk.CTkFrame(frame, fg_color="transparent")
+    row1.pack(fill="x", padx=12, pady=(3, 2))
+
+    ctk.CTkLabel(row1, text="Quality:", font=LABEL_FONT).pack(side="left", padx=(0, 4))
+    ctk.CTkOptionMenu(row1, variable=q_var, width=175,
+                      values=list(AUDIO_BITRATE_MAP.keys())).pack(side="left", padx=(0, 10))
+
+    ctk.CTkLabel(row1, text="Format:", font=LABEL_FONT).pack(side="left", padx=(0, 4))
+    ctk.CTkOptionMenu(row1, variable=fmt_var, width=75,
+                      values=["mp3", "flac", "wav", "m4a"]).pack(side="left", padx=(0, 10))
+
+    # Row 2: Volume Boost | Silence Trimmer
+    row2 = ctk.CTkFrame(frame, fg_color="transparent")
+    row2.pack(fill="x", padx=12, pady=(2, 6))
+
+    ctk.CTkLabel(row2, text="🔊 Boost:", font=LABEL_FONT).pack(side="left", padx=(0, 4))
+    ctk.CTkOptionMenu(
+        row2, variable=vol_boost_var, width=120,
+        values=["Normal (0 dB)", "+3 dB (Gentle)", "+6 dB (Medium)", "+9 dB (Strong)", "+12 dB (Max)"]
+    ).pack(side="left", padx=(0, 10))
+
+    ctk.CTkCheckBox(row2, text="✂ Trim Silence", variable=silence_trim_var, font=("Segoe UI", 11)).pack(side="left")
+
+    return q_var, fmt_var, vol_boost_var, silence_trim_var
 
 def make_stale_banner(parent):
     """Full-width amber warning panel — impossible to miss."""
@@ -2351,254 +2451,6 @@ def bind_url_hint(entry, tab_name, suggestion_tab):
 def bind_keyboard_shortcuts(entry, dl_cmd):
     entry.bind("<Control-s>", lambda e: dl_cmd())
     entry.bind("<Control-S>", lambda e: dl_cmd())
-
-def make_segment_row(parent, check_cmd=None):
-    """Creates an interactive Visual Clip / Segment Studio.
-    Returns (enabled_var, start_entry, end_entry)."""
-    outer = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=10)
-    outer.pack(fill="x", padx=20, pady=(0, 6))
-
-    header = ctk.CTkFrame(outer, fg_color="transparent")
-    header.pack(fill="x", padx=12, pady=(8, 4))
-
-    enabled_var = ctk.BooleanVar(value=False)
-    chk = ctk.CTkCheckBox(
-        header, text="✂  Clip / Segment Studio  (download portion)",
-        variable=enabled_var,
-        font=("Segoe UI", 12, "bold"), text_color=COL_TEXT
-    )
-    chk.pack(side="left")
-
-    badge_lbl = ctk.CTkLabel(
-        header, text="",
-        font=("Consolas", 11, "bold"), text_color=COL_ACCENT
-    )
-    badge_lbl.pack(side="right", padx=(0, 4))
-
-    body = ctk.CTkFrame(outer, fg_color="transparent")
-
-    # State
-    state = {
-        "max_duration": 300.0,
-        "is_syncing": False,
-        "debounce_id": None,
-    }
-
-    # ── Sliders Frame ──────────────────────────────────────
-    studio_box = ctk.CTkFrame(body, fg_color=COL_DARK, corner_radius=8)
-    studio_box.pack(fill="x", padx=12, pady=(2, 6))
-
-    # Row 1: Start Slider & Controls
-    row_start = ctk.CTkFrame(studio_box, fg_color="transparent")
-    row_start.pack(fill="x", padx=10, pady=(8, 4))
-
-    ctk.CTkLabel(row_start, text="Start:", width=45, font=LABEL_FONT, anchor="w").pack(side="left")
-    start_entry = ctk.CTkEntry(row_start, width=80, font=ENTRY_FONT, placeholder_text="00:00")
-    start_entry.insert(0, "00:00")
-    start_entry.pack(side="left", padx=(0, 8))
-
-    slider_start = ctk.CTkSlider(row_start, from_=0, to=state["max_duration"],
-                                 progress_color=COL_ACCENT, fg_color="#1E293B",
-                                 height=18)
-    slider_start.set(0)
-    slider_start.pack(side="left", fill="x", expand=True, padx=(0, 8))
-
-    def _apply_start(val):
-        if state["is_syncing"]: return
-        state["is_syncing"] = True
-        val = max(0.0, min(float(val), slider_end.get()))
-        slider_start.set(val)
-        start_entry.delete(0, "end")
-        start_entry.insert(0, format_seconds_to_time(val))
-        state["is_syncing"] = False
-        _update_badge()
-        _trigger_check_debounced()
-
-    def _apply_end(val):
-        if state["is_syncing"]: return
-        state["is_syncing"] = True
-        val = max(slider_start.get(), min(float(val), state["max_duration"]))
-        slider_end.set(val)
-        end_entry.delete(0, "end")
-        end_entry.insert(0, format_seconds_to_time(val))
-        state["is_syncing"] = False
-        _update_badge()
-        _trigger_check_debounced()
-
-    def _nudge_start(delta):
-        s_val = parse_timestamp(start_entry.get()) or 0.0
-        new_val = max(0.0, min(s_val + delta, slider_end.get()))
-        _apply_start(new_val)
-
-    ctk.CTkButton(row_start, text="⏮", width=28, height=26, font=("Segoe UI", 11, "bold"),
-                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
-                  command=lambda: _apply_start(0.0)).pack(side="left", padx=2)
-    ctk.CTkButton(row_start, text="−5s", width=34, height=26, font=("Segoe UI", 10),
-                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
-                  command=lambda: _nudge_start(-5.0)).pack(side="left", padx=2)
-    ctk.CTkButton(row_start, text="+5s", width=34, height=26, font=("Segoe UI", 10),
-                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
-                  command=lambda: _nudge_start(5.0)).pack(side="left", padx=2)
-
-    # Row 2: End Slider & Controls
-    row_end = ctk.CTkFrame(studio_box, fg_color="transparent")
-    row_end.pack(fill="x", padx=10, pady=(4, 8))
-
-    ctk.CTkLabel(row_end, text="End:", width=45, font=LABEL_FONT, anchor="w").pack(side="left")
-    end_entry = ctk.CTkEntry(row_end, width=80, font=ENTRY_FONT, placeholder_text="End")
-    end_entry.pack(side="left", padx=(0, 8))
-
-    slider_end = ctk.CTkSlider(row_end, from_=0, to=state["max_duration"],
-                               progress_color=COL_ACCENT, fg_color="#1E293B",
-                               height=18)
-    slider_end.set(state["max_duration"])
-    slider_end.pack(side="left", fill="x", expand=True, padx=(0, 8))
-
-    def _nudge_end(delta):
-        e_val = parse_timestamp(end_entry.get())
-        if e_val is None: e_val = state["max_duration"]
-        new_val = max(slider_start.get(), min(e_val + delta, state["max_duration"]))
-        _apply_end(new_val)
-
-    ctk.CTkButton(row_end, text="−5s", width=34, height=26, font=("Segoe UI", 10),
-                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
-                  command=lambda: _nudge_end(-5.0)).pack(side="left", padx=2)
-    ctk.CTkButton(row_end, text="+5s", width=34, height=26, font=("Segoe UI", 10),
-                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
-                  command=lambda: _nudge_end(5.0)).pack(side="left", padx=2)
-    ctk.CTkButton(row_end, text="⏭", width=28, height=26, font=("Segoe UI", 11, "bold"),
-                  fg_color=COL_CHECK, hover_color=COL_CHECKH,
-                  command=lambda: _apply_end(state["max_duration"])).pack(side="left", padx=2)
-
-    # ── Summary & Presets Bar ──
-    info_row = ctk.CTkFrame(body, fg_color="transparent")
-    info_row.pack(fill="x", padx=12, pady=(0, 8))
-
-    summary_lbl = ctk.CTkLabel(info_row, text="Selected: Full Video",
-                              font=("Segoe UI", 11, "bold"), text_color=COL_ACCENT)
-    summary_lbl.pack(side="left")
-
-    def _reset_full():
-        _apply_start(0.0)
-        _apply_end(state["max_duration"])
-        end_entry.delete(0, "end")
-
-    ctk.CTkButton(info_row, text="🎯 Full Video (Reset)", width=130, height=24,
-                  font=("Segoe UI", 10, "bold"), fg_color=COL_CHECK, hover_color=COL_CHECKH,
-                  command=_reset_full).pack(side="right")
-
-    # ── Synchronization Logic ──────────────────────────────
-    def _update_badge():
-        s_val = slider_start.get()
-        e_val = slider_end.get()
-        max_d = state["max_duration"]
-        clip_len = max(0.0, e_val - s_val)
-        txt = f"⏱ {format_seconds_to_time(s_val)} → {format_seconds_to_time(e_val)} ({format_seconds_to_time(clip_len)})"
-        badge_lbl.configure(text=txt if enabled_var.get() else "")
-        summary_lbl.configure(text=f"Clip Length: {format_seconds_to_time(clip_len)}  |  Total: {format_seconds_to_time(max_d)}")
-
-    def _trigger_check_debounced():
-        if check_cmd:
-            if state["debounce_id"]:
-                try: app.after_cancel(state["debounce_id"])
-                except Exception: pass
-            state["debounce_id"] = app.after(350, check_cmd)
-
-    def _on_slider_start_drag(val):
-        if state["is_syncing"]: return
-        fval = float(val)
-        if fval > slider_end.get():
-            slider_end.set(fval)
-            end_entry.delete(0, "end")
-            end_entry.insert(0, format_seconds_to_time(fval))
-        start_entry.delete(0, "end")
-        start_entry.insert(0, format_seconds_to_time(fval))
-        _update_badge()
-        _trigger_check_debounced()
-
-    def _on_slider_end_drag(val):
-        if state["is_syncing"]: return
-        fval = float(val)
-        if fval < slider_start.get():
-            slider_start.set(fval)
-            start_entry.delete(0, "end")
-            start_entry.insert(0, format_seconds_to_time(fval))
-        end_entry.delete(0, "end")
-        end_entry.insert(0, format_seconds_to_time(fval))
-        _update_badge()
-        _trigger_check_debounced()
-
-    slider_start.configure(command=_on_slider_start_drag)
-    slider_end.configure(command=_on_slider_end_drag)
-
-    def _on_entry_start_change(*_):
-        val = parse_timestamp(start_entry.get())
-        if val is not None:
-            _apply_start(val)
-
-    def _on_entry_end_change(*_):
-        txt = end_entry.get().strip()
-        if not txt:
-            _apply_end(state["max_duration"])
-            end_entry.delete(0, "end")
-            return
-        val = parse_timestamp(txt)
-        if val is not None:
-            _apply_end(val)
-
-    start_entry.bind("<FocusOut>", _on_entry_start_change)
-    start_entry.bind("<Return>", _on_entry_start_change)
-    end_entry.bind("<FocusOut>", _on_entry_end_change)
-    end_entry.bind("<Return>", _on_entry_end_change)
-
-    def set_duration(dur):
-        if not dur or dur <= 0: return
-        dur = float(dur)
-        state["max_duration"] = dur
-        slider_start.configure(to=dur)
-        slider_end.configure(to=dur)
-        current_e = parse_timestamp(end_entry.get())
-        if current_e is None or current_e >= dur or current_e == 300.0:
-            slider_end.set(dur)
-            if end_entry.get().strip():
-                end_entry.delete(0, "end")
-                end_entry.insert(0, format_seconds_to_time(dur))
-        _update_badge()
-
-    start_entry._set_duration = set_duration
-
-    def _toggle(*_):
-        if enabled_var.get():
-            body.pack(fill="x", after=header)
-            _update_badge()
-        else:
-            body.pack_forget()
-            badge_lbl.configure(text="")
-        _trigger_check_debounced()
-
-    enabled_var.trace_add("write", _toggle)
-    body.pack_forget()   # hidden by default
-
-    return enabled_var, start_entry, end_entry
-
-def _get_seg_params(enabled_var, start_entry, end_entry):
-    """Read segment UI vars and return (seg_start, seg_end, label_suffix)."""
-    if not enabled_var.get():
-        return None, None, ""
-    s = parse_timestamp(start_entry.get())
-    e = parse_timestamp(end_entry.get())
-    if s is None and e is None:
-        return None, None, ""
-    if s is not None and s == 0.0 and e is None:
-        return None, None, ""
-    # Validate: end must be > start
-    if s is not None and e is not None and e <= s:
-        return None, None, ""
-    def _fmt(sec):
-        if sec is None: return "start" if s is None else "end"
-        return format_seconds_to_time(sec)
-    label = f" [{_fmt(s)}→{_fmt(e)}]"
-    return s, e, label
 
 # ==========================================
 #  FOOTER — built FIRST so side="bottom" works
@@ -2663,91 +2515,79 @@ def act_svid_check():
     link = vid_entry.get().strip()
     if not link:
         set_status("⚠  Paste a link first.", COL_WARN, "Single Video"); return
-    s, e, _ = _get_seg_params(vid_seg_var, vid_seg_start, vid_seg_end)
     execute_standard_analysis(
         get_video_opts(vid_q_var, vid_s_var, vid_fmt_var, vid_path_var.get(), True),
         [link], vid_info_box, is_audio=False, tab="Single Video",
-        thumb_label=vid_thumb_label, stale_banner=vid_stale_banner,
-        seg_start=s, seg_end=e)
+        thumb_label=vid_thumb_label, stale_banner=vid_stale_banner)
 
 def act_svid_dl(start_paused=False):
     link = vid_entry.get().strip()
     if not link:
         set_status("⚠  Paste a link first.", COL_WARN, "Single Video"); return
     title, size = get_info_details(vid_info_box, link)
-    s, e, lbl = _get_seg_params(vid_seg_var, vid_seg_start, vid_seg_end)
     run_download_thread(
-        get_video_opts(vid_q_var, vid_s_var, vid_fmt_var, vid_path_var.get(),
-                       seg_start=s, seg_end=e),
-        [link], vid_path_var.get(), f"Single-Video{lbl}", title, "Single Video",
-        size, vid_q_var.get(), vid_fmt_var.get(), start_paused, s, e)
+        get_video_opts(vid_q_var, vid_s_var, vid_fmt_var, vid_path_var.get()),
+        [link], vid_path_var.get(), "Single-Video", title, "Single Video",
+        size, vid_q_var.get(), vid_fmt_var.get(), start_paused,
+        volume_boost=vid_vol_var.get(), trim_silence=vid_trim_var.get())
 
 def act_saud_check():
     link = aud_entry.get().strip()
     if not link:
         set_status("⚠  Paste a link first.", COL_WARN, "Single Audio"); return
-    s, e, _ = _get_seg_params(aud_seg_var, aud_seg_start, aud_seg_end)
     execute_standard_analysis(
         get_audio_opts(aud_q_var, aud_fmt_var, aud_path_var.get(), True),
         [link], aud_info_box, is_audio=True,
         audio_bitrate=get_audio_bitrate(aud_q_var), tab="Single Audio",
-        thumb_label=aud_thumb_label, stale_banner=aud_stale_banner,
-        seg_start=s, seg_end=e)
+        thumb_label=aud_thumb_label, stale_banner=aud_stale_banner)
 
 def act_saud_dl(start_paused=False):
     link = aud_entry.get().strip()
     if not link:
         set_status("⚠  Paste a link first.", COL_WARN, "Single Audio"); return
     title, size = get_info_details(aud_info_box, link)
-    s, e, lbl = _get_seg_params(aud_seg_var, aud_seg_start, aud_seg_end)
     run_download_thread(
-        get_audio_opts(aud_q_var, aud_fmt_var, aud_path_var.get(),
-                       seg_start=s, seg_end=e),
-        [link], aud_path_var.get(), f"Single-Audio{lbl}", title, "Single Audio",
-        size, aud_q_var.get(), aud_fmt_var.get(), start_paused, s, e)
+        get_audio_opts(aud_q_var, aud_fmt_var, aud_path_var.get()),
+        [link], aud_path_var.get(), "Single-Audio", title, "Single Audio",
+        size, aud_q_var.get(), aud_fmt_var.get(), start_paused,
+        volume_boost=aud_vol_var.get(), trim_silence=aud_trim_var.get())
 
 def act_bvid_check():
     links = [l for l in bvid_text.get("1.0", "end").splitlines() if l.strip()]
-    s, e, _ = _get_seg_params(bvid_seg_var, bvid_seg_start, bvid_seg_end)
     execute_standard_analysis(
         get_video_opts(bvid_q_var, bvid_s_var, bvid_fmt_var, bvid_path_var.get(), True),
         links, bvid_info_box, is_audio=False, tab="Batch Video",
-        thumb_label=bvid_thumb_label, stale_banner=bvid_stale_banner,
-        seg_start=s, seg_end=e)
+        thumb_label=bvid_thumb_label, stale_banner=bvid_stale_banner)
 
 def act_bvid_dl(start_paused=False):
     links = [l for l in bvid_text.get("1.0", "end").splitlines() if l.strip()]
     if not links:
         set_status("⚠  No links in the box.", COL_WARN, "Batch Video"); return
     title, size = get_info_details(bvid_info_box, "Batch Video")
-    s, e, lbl = _get_seg_params(bvid_seg_var, bvid_seg_start, bvid_seg_end)
     run_download_thread(
-        get_video_opts(bvid_q_var, bvid_s_var, bvid_fmt_var, bvid_path_var.get(),
-                       seg_start=s, seg_end=e),
-        links, bvid_path_var.get(), f"Batch-Video{lbl}", title, "Batch Video",
-        size, bvid_q_var.get(), bvid_fmt_var.get(), start_paused, s, e)
+        get_video_opts(bvid_q_var, bvid_s_var, bvid_fmt_var, bvid_path_var.get()),
+        links, bvid_path_var.get(), "Batch-Video", title, "Batch Video",
+        size, bvid_q_var.get(), bvid_fmt_var.get(), start_paused,
+        volume_boost=bvid_vol_var.get(), trim_silence=bvid_trim_var.get())
 
 def act_baud_check():
     links = [l for l in baud_text.get("1.0", "end").splitlines() if l.strip()]
-    s, e, _ = _get_seg_params(baud_seg_var, baud_seg_start, baud_seg_end)
     execute_standard_analysis(
         get_audio_opts(baud_q_var, baud_fmt_var, baud_path_var.get(), True),
         links, baud_info_box, is_audio=True,
         audio_bitrate=get_audio_bitrate(baud_q_var), tab="Batch Audio",
-        thumb_label=baud_thumb_label, stale_banner=baud_stale_banner,
-        seg_start=s, seg_end=e)
+        thumb_label=baud_thumb_label, stale_banner=baud_stale_banner)
 
 def act_baud_dl(start_paused=False):
     links = [l for l in baud_text.get("1.0", "end").splitlines() if l.strip()]
     if not links:
         set_status("⚠  No links in the box.", COL_WARN, "Batch Audio"); return
     title, size = get_info_details(baud_info_box, "Batch Audio")
-    s, e, lbl = _get_seg_params(baud_seg_var, baud_seg_start, baud_seg_end)
     run_download_thread(
-        get_audio_opts(baud_q_var, baud_fmt_var, baud_path_var.get(),
-                       seg_start=s, seg_end=e),
-        links, baud_path_var.get(), f"Batch-Audio{lbl}", title, "Batch Audio",
-        size, baud_q_var.get(), baud_fmt_var.get(), start_paused, s, e)
+        get_audio_opts(baud_q_var, baud_fmt_var, baud_path_var.get()),
+        links, baud_path_var.get(), "Batch-Audio", title, "Batch Audio",
+        size, baud_q_var.get(), baud_fmt_var.get(), start_paused,
+        volume_boost=baud_vol_var.get(), trim_silence=baud_trim_var.get())
 
 def act_pvid_check():
     analyze_playlist(
@@ -2759,7 +2599,8 @@ def act_pvid_check():
 def act_pvid_dl(start_paused=False):
     start_playlist_download(pvid_q_var, pvid_s_var, pvid_fmt_var,
                              pvid_path_var.get(), pvid_entry.get().strip(),
-                             pvid_checkboxes, True, "Playlist Video", start_paused)
+                             pvid_checkboxes, True, "Playlist Video", start_paused,
+                             volume_boost=pvid_vol_var.get(), trim_silence=pvid_trim_var.get())
 
 def act_paud_check():
     analyze_playlist(
@@ -2772,13 +2613,17 @@ def act_paud_check():
 def act_paud_dl(start_paused=False):
     start_playlist_download(paud_q_var, None, paud_fmt_var,
                              paud_path_var.get(), paud_entry.get().strip(),
-                             paud_checkboxes, False, "Playlist Audio", start_paused)
+                             paud_checkboxes, False, "Playlist Audio", start_paused,
+                             volume_boost=paud_vol_var.get(), trim_silence=paud_trim_var.get())
 
 # ==========================================
 #  TAB 1 — SINGLE VIDEO
 # ==========================================
 t1 = tabview.tab("Single Video")
-t1_top = ctk.CTkFrame(t1, fg_color="transparent")
+t1_scroll_main = ctk.CTkScrollableFrame(t1, fg_color="transparent")
+t1_scroll_main.pack(fill="both", expand=True, padx=0, pady=0)
+
+t1_top = ctk.CTkFrame(t1_scroll_main, fg_color="transparent")
 t1_top.pack(fill="x", padx=20, pady=(8, 0))
 t1_left = ctk.CTkFrame(t1_top, fg_color="transparent")
 t1_left.pack(side="left", fill="both", expand=True)
@@ -2786,24 +2631,27 @@ make_section_label(t1_left, "Video link")
 vid_entry = make_entry_row(t1_left, "Paste YouTube / any site URL here…")
 bind_url_hint(vid_entry, "Single Video", "Playlist Video")
 make_section_label(t1_left, "Options")
-vid_q_var, vid_s_var, vid_fmt_var = create_vid_options(t1_left)
+vid_q_var, vid_s_var, vid_fmt_var, vid_vol_var, vid_trim_var = create_vid_options(t1_left)
 vid_path_var   = create_path_selector(t1_left, VID_DIR)
-vid_seg_var, vid_seg_start, vid_seg_end = make_segment_row(t1_left, act_svid_check)
 vid_thumb_label = make_thumb_panel(t1_top)
-make_divider(t1)
-btn_check_vid  = make_check_btn(t1, "Step 1 — Check size & preview", act_svid_check)
-vid_stale_banner = make_stale_banner(t1)
-vid_info_box   = make_info_box(t1, height=55)
-btn_dl_vid, btn_q_vid = make_dl_btn_group(t1, "⬇  Download Video", act_svid_dl, lambda: act_svid_dl(start_paused=True))
+
+make_divider(t1_scroll_main)
+btn_check_vid  = make_check_btn(t1_scroll_main, "Step 1 — Check size & preview", act_svid_check)
+vid_stale_banner = make_stale_banner(t1_scroll_main)
+vid_info_box   = make_info_box(t1_scroll_main, height=65)
+btn_dl_vid, btn_q_vid = make_dl_btn_group(t1_scroll_main, "⬇  Download Video", act_svid_dl, lambda: act_svid_dl(start_paused=True))
 bind_keyboard_shortcuts(vid_entry, act_svid_dl)
-attach_auto_check([vid_q_var, vid_s_var, vid_fmt_var], vid_entry, act_svid_check)
+attach_auto_check([vid_q_var, vid_s_var, vid_fmt_var, vid_vol_var], vid_entry, act_svid_check)
 bind_url_change_clear(vid_entry, vid_info_box, vid_stale_banner)
 
 # ==========================================
 #  TAB 2 — SINGLE AUDIO
 # ==========================================
 t2 = tabview.tab("Single Audio")
-t2_top = ctk.CTkFrame(t2, fg_color="transparent")
+t2_scroll_main = ctk.CTkScrollableFrame(t2, fg_color="transparent")
+t2_scroll_main.pack(fill="both", expand=True, padx=0, pady=0)
+
+t2_top = ctk.CTkFrame(t2_scroll_main, fg_color="transparent")
 t2_top.pack(fill="x", padx=20, pady=(8, 0))
 t2_left = ctk.CTkFrame(t2_top, fg_color="transparent")
 t2_left.pack(side="left", fill="both", expand=True)
@@ -2811,87 +2659,81 @@ make_section_label(t2_left, "Audio link")
 aud_entry = make_entry_row(t2_left, "Paste YouTube / any site URL here…")
 bind_url_hint(aud_entry, "Single Audio", "Playlist Audio")
 make_section_label(t2_left, "Options")
-aud_q_var, aud_fmt_var = create_aud_options(t2_left)
+aud_q_var, aud_fmt_var, aud_vol_var, aud_trim_var = create_aud_options(t2_left)
 aud_path_var   = create_path_selector(t2_left, AUD_DIR)
-aud_seg_var, aud_seg_start, aud_seg_end = make_segment_row(t2_left, act_saud_check)
 aud_thumb_label = make_thumb_panel(t2_top, "Thumbnail\nappears here")
-make_divider(t2)
-btn_check_aud  = make_check_btn(t2, "Step 1 — Check size & preview", act_saud_check)
-aud_stale_banner = make_stale_banner(t2)
-aud_info_box   = make_info_box(t2, height=55)
-btn_dl_aud, btn_q_aud = make_dl_btn_group(t2, "⬇  Download Audio", act_saud_dl, lambda: act_saud_dl(start_paused=True))
+
+make_divider(t2_scroll_main)
+btn_check_aud  = make_check_btn(t2_scroll_main, "Step 1 — Check size & preview", act_saud_check)
+aud_stale_banner = make_stale_banner(t2_scroll_main)
+aud_info_box   = make_info_box(t2_scroll_main, height=65)
+btn_dl_aud, btn_q_aud = make_dl_btn_group(t2_scroll_main, "⬇  Download Audio", act_saud_dl, lambda: act_saud_dl(start_paused=True))
 bind_keyboard_shortcuts(aud_entry, act_saud_dl)
-attach_auto_check([aud_q_var, aud_fmt_var], aud_entry, act_saud_check)
+attach_auto_check([aud_q_var, aud_fmt_var, aud_vol_var], aud_entry, act_saud_check)
 bind_url_change_clear(aud_entry, aud_info_box, aud_stale_banner)
 
-# ==========================================
 # ==========================================
 #  TAB 3 — BATCH VIDEO
 # ==========================================
 t3 = tabview.tab("Batch Video")
+t3_scroll_main = ctk.CTkScrollableFrame(t3, fg_color="transparent")
+t3_scroll_main.pack(fill="both", expand=True, padx=0, pady=0)
 
-# ── Bottom section packed FIRST so buttons are always visible ──
-bvid_bottom = ctk.CTkFrame(t3, fg_color="transparent")
-bvid_bottom.pack(side="bottom", fill="x", pady=(0, 10))
-
-bvid_stale_banner = make_stale_banner(bvid_bottom)
-bvid_info_box   = make_info_box(bvid_bottom, height=55)
-btn_dl_bvid, btn_q_bvid = make_dl_btn_group(bvid_bottom, "⬇  Download Batch", act_bvid_dl, lambda: act_bvid_dl(start_paused=True))
-
-# ── Top section fills remaining space ──
-t3_top = ctk.CTkFrame(t3, fg_color="transparent")
-t3_top.pack(fill="both", expand=True, padx=20, pady=(8, 0))
+t3_top = ctk.CTkFrame(t3_scroll_main, fg_color="transparent")
+t3_top.pack(fill="x", padx=20, pady=(8, 0))
 t3_left = ctk.CTkFrame(t3_top, fg_color="transparent")
 t3_left.pack(side="left", fill="both", expand=True)
 make_section_label(t3_left, "Video links  (one per line)")
 bvid_text = make_textbox_row(t3_left)
 make_section_label(t3_left, "Options")
-bvid_q_var, bvid_s_var, bvid_fmt_var = create_vid_options(t3_left)
+bvid_q_var, bvid_s_var, bvid_fmt_var, bvid_vol_var, bvid_trim_var = create_vid_options(t3_left)
 bvid_path_var   = create_path_selector(t3_left, VID_DIR)
-bvid_seg_var, bvid_seg_start, bvid_seg_end = make_segment_row(t3_left, act_bvid_check)
 bvid_thumb_label = make_thumb_panel(t3_top, "First link\npreview")
 
-btn_check_bvid  = make_check_btn(t3, "Step 1 — Analyze links", act_bvid_check)
+make_divider(t3_scroll_main)
+btn_check_bvid  = make_check_btn(t3_scroll_main, "Step 1 — Analyze links", act_bvid_check)
+bvid_stale_banner = make_stale_banner(t3_scroll_main)
+bvid_info_box   = make_info_box(t3_scroll_main, height=75)
+btn_dl_bvid, btn_q_bvid = make_dl_btn_group(t3_scroll_main, "⬇  Download Batch", act_bvid_dl, lambda: act_bvid_dl(start_paused=True))
 
-attach_auto_check([bvid_q_var, bvid_s_var, bvid_fmt_var], bvid_text, act_bvid_check)
+attach_auto_check([bvid_q_var, bvid_s_var, bvid_fmt_var, bvid_vol_var], bvid_text, act_bvid_check)
 bind_text_change_clear(bvid_text, bvid_info_box, bvid_stale_banner)
 
 # ==========================================
 #  TAB 4 — BATCH AUDIO
 # ==========================================
 t4 = tabview.tab("Batch Audio")
+t4_scroll_main = ctk.CTkScrollableFrame(t4, fg_color="transparent")
+t4_scroll_main.pack(fill="both", expand=True, padx=0, pady=0)
 
-# ── Bottom section packed FIRST so buttons are always visible ──
-baud_bottom = ctk.CTkFrame(t4, fg_color="transparent")
-baud_bottom.pack(side="bottom", fill="x", pady=(0, 10))
-
-baud_stale_banner = make_stale_banner(baud_bottom)
-baud_info_box     = make_info_box(baud_bottom, height=55)
-btn_dl_baud, btn_q_baud = make_dl_btn_group(baud_bottom, "⬇  Download Batch", act_baud_dl, lambda: act_baud_dl(start_paused=True))
-
-# ── Top section fills remaining space ──
-t4_top = ctk.CTkFrame(t4, fg_color="transparent")
-t4_top.pack(fill="both", expand=True, padx=20, pady=(8, 0))
+t4_top = ctk.CTkFrame(t4_scroll_main, fg_color="transparent")
+t4_top.pack(fill="x", padx=20, pady=(8, 0))
 t4_left = ctk.CTkFrame(t4_top, fg_color="transparent")
 t4_left.pack(side="left", fill="both", expand=True)
 make_section_label(t4_left, "Audio links  (one per line)")
 baud_text = make_textbox_row(t4_left)
 make_section_label(t4_left, "Options")
-baud_q_var, baud_fmt_var = create_aud_options(t4_left)
+baud_q_var, baud_fmt_var, baud_vol_var, baud_trim_var = create_aud_options(t4_left)
 baud_path_var   = create_path_selector(t4_left, AUD_DIR)
-baud_seg_var, baud_seg_start, baud_seg_end = make_segment_row(t4_left, act_baud_check)
 baud_thumb_label = make_thumb_panel(t4_top, "First link\npreview")
 
-btn_check_baud    = make_check_btn(t4, "Step 1 — Analyze links", act_baud_check)
+make_divider(t4_scroll_main)
+btn_check_baud    = make_check_btn(t4_scroll_main, "Step 1 — Analyze links", act_baud_check)
+baud_stale_banner = make_stale_banner(t4_scroll_main)
+baud_info_box     = make_info_box(t4_scroll_main, height=75)
+btn_dl_baud, btn_q_baud = make_dl_btn_group(t4_scroll_main, "⬇  Download Batch", act_baud_dl, lambda: act_baud_dl(start_paused=True))
 
-attach_auto_check([baud_q_var, baud_fmt_var], baud_text, act_baud_check)
+attach_auto_check([baud_q_var, baud_fmt_var, baud_vol_var], baud_text, act_baud_check)
 bind_text_change_clear(baud_text, baud_info_box, baud_stale_banner)
 
 # ==========================================
 #  TAB 5 — PLAYLIST VIDEO
 # ==========================================
 t5 = tabview.tab("Playlist Video")
-t5_top = ctk.CTkFrame(t5, fg_color="transparent")
+t5_scroll_main = ctk.CTkScrollableFrame(t5, fg_color="transparent")
+t5_scroll_main.pack(fill="both", expand=True, padx=0, pady=0)
+
+t5_top = ctk.CTkFrame(t5_scroll_main, fg_color="transparent")
 t5_top.pack(fill="x", padx=20, pady=(8, 0))
 t5_left = ctk.CTkFrame(t5_top, fg_color="transparent")
 t5_left.pack(side="left", fill="both", expand=True)
@@ -2899,31 +2741,33 @@ make_section_label(t5_left, "Playlist link")
 pvid_entry = make_entry_row(t5_left, "Paste YouTube playlist URL here…")
 bind_url_hint(pvid_entry, "Playlist Video", "Single Video")
 make_section_label(t5_left, "Options")
-pvid_q_var, pvid_s_var, pvid_fmt_var = create_vid_options(t5_left)
-pvid_path_var    = create_path_selector(t5_left, VID_DIR)
-pvid_thumb_label  = make_thumb_panel(t5_top, "Playlist cover\nappears here")
+pvid_q_var, pvid_s_var, pvid_fmt_var, pvid_vol_var, pvid_trim_var = create_vid_options(t5_left)
+pvid_path_var   = create_path_selector(t5_left, VID_DIR)
+pvid_thumb_label = make_thumb_panel(t5_top, "Playlist\npreview")
 
-pvid_stale_banner = make_stale_banner(t5)
-btn_check_pvid    = make_check_btn(t5, "Step 1 — Fetch checklist", act_pvid_check)
+make_divider(t5_scroll_main)
+pvid_stale_banner = make_stale_banner(t5_scroll_main)
+btn_check_pvid = make_check_btn(t5_scroll_main, "Step 1 — Fetch playlist items", act_pvid_check)
 
-pvid_ctrl = ctk.CTkFrame(t5, fg_color="transparent")
-pvid_ctrl.pack(fill="x", padx=20, pady=(4, 2))
+# ── Unified Actions Ribbon (Select All, Deselect All, Range Selector) ──
+pvid_tools = ctk.CTkFrame(t5_scroll_main, fg_color=COL_PANEL, corner_radius=8)
+pvid_tools.pack(fill="x", padx=20, pady=(6, 4))
+pvid_tools_row = ctk.CTkFrame(pvid_tools, fg_color="transparent")
+pvid_tools_row.pack(fill="x", padx=10, pady=6)
+
 for txt, st in [("Select all", 1), ("Deselect all", 0)]:
     col = COL_ACCENT if st == 1 else COL_CHECK
-    b   = ctk.CTkButton(pvid_ctrl, text=txt, width=100, font=BTN_SUB,
+    b   = ctk.CTkButton(pvid_tools_row, text=txt, width=95, height=28, font=BTN_SUB,
                         fg_color=col,
                         command=lambda s=st: toggle_all_checkboxes(
                             pvid_checkboxes, s, pvid_dynamic_lbl))
-    b.pack(side="left", padx=(0, 6) if st == 1 else 0)
+    b.pack(side="left", padx=(0, 6))
     MANAGED_BUTTONS.append(b)
 
-# Range selector row
-_pvid_range_frame = ctk.CTkFrame(t5, fg_color="transparent")
-_pvid_range_frame.pack(fill="x", padx=20, pady=(2, 0))
-ctk.CTkLabel(_pvid_range_frame, text="Range:", font=LABEL_FONT).pack(side="left", padx=(0, 5))
-pvid_range_entry = ctk.CTkEntry(_pvid_range_frame, width=110, font=ENTRY_FONT,
-                                 placeholder_text="e.g. 3-10")
+ctk.CTkLabel(pvid_tools_row, text="Range:", font=LABEL_FONT).pack(side="left", padx=(10, 4))
+pvid_range_entry = ctk.CTkEntry(pvid_tools_row, width=95, height=28, font=ENTRY_FONT, placeholder_text="e.g. 1-10")
 pvid_range_entry.pack(side="left", padx=(0, 6))
+
 def _apply_pvid_range():
     txt = pvid_range_entry.get().strip()
     if not txt or not pvid_checkboxes: return
@@ -2940,29 +2784,26 @@ def _apply_pvid_range():
         update_dynamic_size(pvid_checkboxes, pvid_dynamic_lbl)
     except Exception:
         pass
-ctk.CTkButton(_pvid_range_frame, text="Apply", width=80, height=28, font=BTN_SUB,
+
+ctk.CTkButton(pvid_tools_row, text="Apply", width=65, height=28, font=BTN_SUB,
               fg_color=COL_CHECK, hover_color=COL_CHECKH,
               command=_apply_pvid_range).pack(side="left")
-ctk.CTkLabel(_pvid_range_frame, text="Select by range or comma list",
-             font=("Segoe UI", 10), text_color=COL_MUTED).pack(side="left", padx=(8, 0))
 
+# ── Spacious Playlist Items Checklist ──
 pvid_checkboxes = []
-pvid_scroll = ctk.CTkScrollableFrame(t5, fg_color=COL_DARK, height=160)
-pvid_bottom = ctk.CTkFrame(t5, fg_color="transparent")
+pvid_scroll = ctk.CTkScrollableFrame(t5_scroll_main, fg_color=COL_DARK, height=280)
+pvid_scroll.pack(fill="both", expand=True, padx=20, pady=(4, 6))
 
-pvid_bottom.pack(side="bottom", fill="x", pady=(0, 10))
-pvid_scroll.pack(side="top", fill="both", expand=True, padx=20, pady=(4, 0))
-
-pvid_summary = ctk.CTkFrame(pvid_bottom, fg_color=COL_DARK, corner_radius=8)
-pvid_summary.pack(fill="x", padx=20, pady=(6, 4))
+pvid_summary = ctk.CTkFrame(t5_scroll_main, fg_color=COL_DARK, corner_radius=8)
+pvid_summary.pack(fill="x", padx=20, pady=(4, 4))
 pvid_dynamic_lbl = ctk.CTkLabel(pvid_summary,
     text="Selected: 0 / 0   |   Est. total size: —",
     text_color=COL_ACCENT, font=("Segoe UI", 14, "bold"), anchor="center")
 pvid_dynamic_lbl.pack(fill="x", padx=16, pady=8)
 
-btn_dl_pvid, btn_q_pvid = make_playlist_dl_btn_group(pvid_bottom, "⬇  Download Selected", act_pvid_dl, lambda: act_pvid_dl(start_paused=True))
-pvid_info_box = make_info_box(pvid_bottom, height=1)
-attach_auto_check([pvid_q_var, pvid_s_var, pvid_fmt_var], pvid_entry, act_pvid_check)
+btn_dl_pvid, btn_q_pvid = make_playlist_dl_btn_group(t5_scroll_main, "⬇  Download Selected", act_pvid_dl, lambda: act_pvid_dl(start_paused=True))
+pvid_info_box = make_info_box(t5_scroll_main, height=1)
+attach_auto_check([pvid_q_var, pvid_s_var, pvid_fmt_var, pvid_vol_var], pvid_entry, act_pvid_check)
 bind_url_change_clear(pvid_entry, pvid_info_box, pvid_stale_banner)
 pvid_info_box.pack_forget()
 
@@ -2970,7 +2811,10 @@ pvid_info_box.pack_forget()
 #  TAB 6 — PLAYLIST AUDIO
 # ==========================================
 t6 = tabview.tab("Playlist Audio")
-t6_top = ctk.CTkFrame(t6, fg_color="transparent")
+t6_scroll_main = ctk.CTkScrollableFrame(t6, fg_color="transparent")
+t6_scroll_main.pack(fill="both", expand=True, padx=0, pady=0)
+
+t6_top = ctk.CTkFrame(t6_scroll_main, fg_color="transparent")
 t6_top.pack(fill="x", padx=20, pady=(8, 0))
 t6_left = ctk.CTkFrame(t6_top, fg_color="transparent")
 t6_left.pack(side="left", fill="both", expand=True)
@@ -2978,30 +2822,33 @@ make_section_label(t6_left, "Playlist link")
 paud_entry = make_entry_row(t6_left, "Paste YouTube playlist URL here…")
 bind_url_hint(paud_entry, "Playlist Audio", "Single Audio")
 make_section_label(t6_left, "Options")
-paud_q_var, paud_fmt_var = create_aud_options(t6_left)
+paud_q_var, paud_fmt_var, paud_vol_var, paud_trim_var = create_aud_options(t6_left)
 paud_path_var    = create_path_selector(t6_left, AUD_DIR)
 paud_thumb_label  = make_thumb_panel(t6_top, "Playlist cover\nappears here")
-paud_stale_banner = make_stale_banner(t6)
-btn_check_paud    = make_check_btn(t6, "Step 1 — Fetch checklist", act_paud_check)
 
-paud_ctrl = ctk.CTkFrame(t6, fg_color="transparent")
-paud_ctrl.pack(fill="x", padx=20, pady=(4, 2))
+make_divider(t6_scroll_main)
+paud_stale_banner = make_stale_banner(t6_scroll_main)
+btn_check_paud    = make_check_btn(t6_scroll_main, "Step 1 — Fetch checklist", act_paud_check)
+
+# ── Unified Actions Ribbon (Select All, Deselect All, Range Selector) ──
+paud_tools = ctk.CTkFrame(t6_scroll_main, fg_color=COL_PANEL, corner_radius=8)
+paud_tools.pack(fill="x", padx=20, pady=(6, 4))
+paud_tools_row = ctk.CTkFrame(paud_tools, fg_color="transparent")
+paud_tools_row.pack(fill="x", padx=10, pady=6)
+
 for txt, st in [("Select all", 1), ("Deselect all", 0)]:
     col = COL_ACCENT if st == 1 else COL_CHECK
-    b   = ctk.CTkButton(paud_ctrl, text=txt, width=100, font=BTN_SUB,
+    b   = ctk.CTkButton(paud_tools_row, text=txt, width=95, height=28, font=BTN_SUB,
                         fg_color=col,
                         command=lambda s=st: toggle_all_checkboxes(
                             paud_checkboxes, s, paud_dynamic_lbl))
-    b.pack(side="left", padx=(0, 6) if st == 1 else 0)
+    b.pack(side="left", padx=(0, 6))
     MANAGED_BUTTONS.append(b)
 
-# Range selector row
-_paud_range_frame = ctk.CTkFrame(t6, fg_color="transparent")
-_paud_range_frame.pack(fill="x", padx=20, pady=(2, 0))
-ctk.CTkLabel(_paud_range_frame, text="Range:", font=LABEL_FONT).pack(side="left", padx=(0, 5))
-paud_range_entry = ctk.CTkEntry(_paud_range_frame, width=110, font=ENTRY_FONT,
-                                 placeholder_text="e.g. 3-10")
+ctk.CTkLabel(paud_tools_row, text="Range:", font=LABEL_FONT).pack(side="left", padx=(10, 4))
+paud_range_entry = ctk.CTkEntry(paud_tools_row, width=95, height=28, font=ENTRY_FONT, placeholder_text="e.g. 1-10")
 paud_range_entry.pack(side="left", padx=(0, 6))
+
 def _apply_paud_range():
     txt = paud_range_entry.get().strip()
     if not txt or not paud_checkboxes: return
@@ -3018,29 +2865,26 @@ def _apply_paud_range():
         update_dynamic_size(paud_checkboxes, paud_dynamic_lbl)
     except Exception:
         pass
-ctk.CTkButton(_paud_range_frame, text="Apply", width=80, height=28, font=BTN_SUB,
+
+ctk.CTkButton(paud_tools_row, text="Apply", width=65, height=28, font=BTN_SUB,
               fg_color=COL_CHECK, hover_color=COL_CHECKH,
               command=_apply_paud_range).pack(side="left")
-ctk.CTkLabel(_paud_range_frame, text="Select by range or comma list",
-             font=("Segoe UI", 10), text_color=COL_MUTED).pack(side="left", padx=(8, 0))
 
+# ── Spacious Playlist Items Checklist ──
 paud_checkboxes = []
-paud_scroll = ctk.CTkScrollableFrame(t6, fg_color=COL_DARK, height=160)
-paud_bottom = ctk.CTkFrame(t6, fg_color="transparent")
+paud_scroll = ctk.CTkScrollableFrame(t6_scroll_main, fg_color=COL_DARK, height=280)
+paud_scroll.pack(fill="both", expand=True, padx=20, pady=(4, 6))
 
-paud_bottom.pack(side="bottom", fill="x", pady=(0, 10))
-paud_scroll.pack(side="top", fill="both", expand=True, padx=20, pady=(4, 0))
-
-paud_summary = ctk.CTkFrame(paud_bottom, fg_color=COL_DARK, corner_radius=8)
-paud_summary.pack(fill="x", padx=20, pady=(6, 4))
+paud_summary = ctk.CTkFrame(t6_scroll_main, fg_color=COL_DARK, corner_radius=8)
+paud_summary.pack(fill="x", padx=20, pady=(4, 4))
 paud_dynamic_lbl = ctk.CTkLabel(paud_summary,
     text="Selected: 0 / 0   |   Est. total size: —",
     text_color=COL_ACCENT, font=("Segoe UI", 14, "bold"), anchor="center")
 paud_dynamic_lbl.pack(fill="x", padx=16, pady=8)
 
-btn_dl_paud, btn_q_paud = make_playlist_dl_btn_group(paud_bottom, "⬇  Download Selected", act_paud_dl, lambda: act_paud_dl(start_paused=True))
-paud_info_box = make_info_box(paud_bottom, height=1)
-attach_auto_check([paud_q_var, paud_fmt_var], paud_entry, act_paud_check)
+btn_dl_paud, btn_q_paud = make_playlist_dl_btn_group(t6_scroll_main, "⬇  Download Selected", act_paud_dl, lambda: act_paud_dl(start_paused=True))
+paud_info_box = make_info_box(t6_scroll_main, height=1)
+attach_auto_check([paud_q_var, paud_fmt_var, paud_vol_var], paud_entry, act_paud_check)
 bind_url_change_clear(paud_entry, paud_info_box, paud_stale_banner)
 paud_info_box.pack_forget()
 
@@ -3073,15 +2917,34 @@ lbl_q_total = ctk.CTkLabel(net_top, text="📦 Session: 0 completed", font=("Seg
 lbl_q_total.pack(side="right")
 lbl_q_total_ref = lbl_q_total
 
-# Graph canvas
 speed_canvas = ctk.CTkCanvas(net_frame, height=65, bg="#080C14", highlightthickness=0)
 speed_canvas.pack(fill="x", padx=12, pady=(0, 8))
 speed_canvas_ref = speed_canvas
 
 queue_ctrl = ctk.CTkFrame(t_queue, fg_color="transparent")
 queue_ctrl.pack(fill="x", padx=20, pady=(2, 2))
-ctk.CTkButton(queue_ctrl, text="Clear Finished", width=110, font=BTN_SUB,
-              command=global_queue.clear_finished).pack(side="left")
+
+queue_search_var = ctk.StringVar(value="")
+queue_filter_var = ctk.StringVar(value="All")
+
+queue_search_entry = ctk.CTkEntry(queue_ctrl, placeholder_text="🔍 Filter queue...",
+                                  textvariable=queue_search_var, width=200, font=("Segoe UI", 12))
+queue_search_entry.pack(side="left", padx=(0, 6))
+queue_search_var.trace_add("write", lambda *_: refresh_queue_tab())
+
+def _set_queue_filter(st):
+    queue_filter_var.set(st)
+    refresh_queue_tab()
+
+for st_label, st_val in [("All", "All"), ("Active", "Active"), ("Paused", "Paused"), ("Done", "Done"), ("Error", "Error")]:
+    ctk.CTkButton(
+        queue_ctrl, text=st_label, width=54, height=28, font=("Segoe UI", 10, "bold"),
+        fg_color=COL_CHECK, hover_color=COL_CHECKH,
+        command=lambda s=st_val: _set_queue_filter(s)
+    ).pack(side="left", padx=2)
+
+ctk.CTkButton(queue_ctrl, text="Clear Finished", width=110, height=28, font=BTN_SUB,
+              command=global_queue.clear_finished).pack(side="right")
 queue_box = ctk.CTkScrollableFrame(t_queue, fg_color=COL_DARK)
 queue_box.pack(fill="both", expand=True, padx=20, pady=(4, 14))
 queue_box_ref = queue_box
@@ -3091,9 +2954,47 @@ refresh_queue_tab()
 #  TAB 7 — HISTORY
 # ==========================================
 t7 = tabview.tab("History")
-make_section_label(t7, "Recent downloads  (last 200)")
+make_section_label(t7, "Download History")
+
 hist_ctrl = ctk.CTkFrame(t7, fg_color="transparent")
-hist_ctrl.pack(fill="x", padx=20, pady=(4, 2))
+hist_ctrl.pack(fill="x", padx=20, pady=(2, 6))
+
+hist_search_var = ctk.StringVar(value="")
+hist_filter_var = ctk.StringVar(value="All")
+
+# Search entry with live trace
+search_wrap = ctk.CTkFrame(hist_ctrl, fg_color="transparent")
+search_wrap.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+hist_search_entry = ctk.CTkEntry(
+    search_wrap, placeholder_text="🔍 Search history by title, URL, quality...",
+    textvariable=hist_search_var, font=("Segoe UI", 12), height=32
+)
+hist_search_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
+hist_search_var.trace_add("write", lambda *_: refresh_history_tab())
+
+def _clear_search():
+    hist_search_var.set("")
+    hist_search_entry.delete(0, "end")
+    refresh_history_tab()
+
+ctk.CTkButton(search_wrap, text="✕", width=32, height=32, font=("Segoe UI", 12, "bold"),
+              fg_color=COL_CHECK, hover_color=COL_CHECKH, command=_clear_search).pack(side="left")
+
+# Filter pills
+def _set_hist_filter(cat):
+    hist_filter_var.set(cat)
+    refresh_history_tab()
+
+filter_pills_frame = ctk.CTkFrame(hist_ctrl, fg_color="transparent")
+filter_pills_frame.pack(side="left", padx=(0, 8))
+
+for cat_label, cat_val in [("All", "All"), ("🎬 Video", "Video"), ("🎵 Audio", "Audio")]:
+    ctk.CTkButton(
+        filter_pills_frame, text=cat_label, width=68, height=32, font=("Segoe UI", 11, "bold"),
+        fg_color=COL_CHECK, hover_color=COL_CHECKH,
+        command=lambda c=cat_val: _set_hist_filter(c)
+    ).pack(side="left", padx=2)
 
 def clear_history():
     if messagebox.askyesno("Clear history", "Delete all download history?"):
@@ -3104,15 +3005,16 @@ def clear_history():
             pass
         refresh_history_tab()
 
-ctk.CTkButton(hist_ctrl, text="Refresh",       width=90,  font=BTN_SUB,
-              command=refresh_history_tab).pack(side="left", padx=(0, 6))
-ctk.CTkButton(hist_ctrl, text="Clear history", width=110, font=BTN_SUB,
+ctk.CTkButton(hist_ctrl, text="Refresh", width=75, height=32, font=BTN_SUB,
+              command=refresh_history_tab).pack(side="right", padx=(4, 0))
+ctk.CTkButton(hist_ctrl, text="Clear All", width=75, height=32, font=BTN_SUB,
               fg_color="#7F1D1D", hover_color="#450A0A",
-              command=clear_history).pack(side="left")
+              command=clear_history).pack(side="right")
 
 history_box = ctk.CTkScrollableFrame(t7, fg_color=COL_DARK)
-history_box.pack(fill="both", expand=True, padx=20, pady=(4, 14))
+history_box.pack(fill="both", expand=True, padx=20, pady=(2, 14))
 history_box_ref = history_box
+refresh_history_tab()
 
 # ==========================================
 #  TAB 8 — SETTINGS

@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚀 Hedra Downloader PRO `V20`
+# 🚀 Hedra Downloader PRO `2.0`
 **The Ultimate, Modern, and High-Performance Media Downloader for Windows**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
@@ -24,12 +24,12 @@ Hedra Downloader PRO combines the industry-leading extraction power of `yt-dlp` 
 <table>
   <tr>
     <td width="50%">
-      <h3>✂️ Interactive Visual Clip Studio</h3>
-      Trim and download precise segments of any video or audio without downloading the whole file first. Features interactive dual timeline sliders, live duration badges, and <code>-5s / +5s</code> precision nudge buttons.
+      <h3>🔊 Audio Volume Booster & Silence Trimmer</h3>
+      Boost quiet dialogues and audio tracks up to +12 dB with built-in DSP loudness normalization and smart silence trimming for both video and audio streams.
     </td>
     <td width="50%">
-      <h3>⚡ 1-Click Download Presets</h3>
-      Instant 1-click configuration buttons (<code>🎬 4K Max</code>, <code>📱 1080p MP4</code>, <code>⚡ 720p Fast</code>, <code>🎵 320k MP3</code>, <code>🎧 Studio FLAC</code>) so you never have to fiddle with format dropdowns.
+      <h3>🔍 Search & Filter in Queue & History</h3>
+      Instantly search downloads and history by title, URL, or format with real-time status filtering (All, Downloading, Paused, Pending, Failed).
     </td>
   </tr>
   <tr>

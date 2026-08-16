@@ -4,6 +4,12 @@ __pycache__/
 *$py.class
 *.bak
 
+# Build and Packaging
+build/
+dist/
+*.spec
+*.zip
+
 # Large Binaries (GitHub 100MB limit - users get FFmpeg automatically or via release assets)
 *.exe
 *.dll
@@ -13,6 +19,7 @@ patch*.py
 fb.json
 scratch/
 test_*.py
+ydl_help.txt
 
 # Operating System Files
 Thumbs.db
