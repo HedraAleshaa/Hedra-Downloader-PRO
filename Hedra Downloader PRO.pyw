@@ -50,14 +50,23 @@ check_deps()
 #  SYSTEM SETUP & BUNDLING
 # ==========================================
 def get_ffmpeg_path():
-    if hasattr(sys, '_MEIPASS') and os.path.isfile(os.path.join(sys._MEIPASS, "ffmpeg.exe")):
+    bin_name = "ffmpeg.exe" if platform.system() == "Windows" else "ffmpeg"
+    if hasattr(sys, '_MEIPASS') and os.path.isfile(os.path.join(sys._MEIPASS, bin_name)):
         return sys._MEIPASS
     exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else (os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd())
-    if os.path.isfile(os.path.join(exe_dir, "ffmpeg.exe")):
+    if os.path.isfile(os.path.join(exe_dir, bin_name)):
         return exe_dir
-    if os.path.isfile(os.path.join(os.getcwd(), "ffmpeg.exe")):
+    if os.path.isfile(os.path.join(os.getcwd(), bin_name)):
         return os.getcwd()
+    for p in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]:
+        if os.path.isfile(os.path.join(p, "ffmpeg")):
+            return p
     return exe_dir
+
+if platform.system() != "Windows":
+    for _extra in ["/opt/homebrew/bin", "/usr/local/bin"]:
+        if _extra not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = _extra + ":" + os.environ.get("PATH", "")
 
 APP_VERSION  = "2.0"
 APP_AUTHOR   = "Hedra Aleshaa"

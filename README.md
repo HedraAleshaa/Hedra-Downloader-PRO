@@ -21,22 +21,21 @@
 
 ## 🚀 Quick Start (For You & Friends)
 
-**No Python, no terminal, and no coding required.** Anyone can use this in 3 simple steps:
+**No coding or setup required.** Anyone can use this in 3 simple steps:
 
-### 1️⃣ Download the App
-Go to the **[Latest Release Page](https://github.com/HedraAleshaa/Hedra-Downloader-PRO/releases)** and download:
-- 📦 **`Hedra-Downloader-PRO-v2.0-Windows.zip`** *(Recommended: Everything included, portable)*
+### 🪟 Windows Users:
+1. Go to **[Releases](https://github.com/HedraAleshaa/Hedra-Downloader-PRO/releases)** and download **`Hedra-Downloader-PRO-v2.0-Windows.zip`**.
+2. Right-click and select **"Extract All…"**.
+3. Open the folder and double-click **`Hedra Downloader PRO 2.0.exe`**.
 
-### 2️⃣ Extract & Open
-1. Right-click the downloaded `.zip` file and select **"Extract All…"**.
-2. Open the extracted folder and double-click:
-   ```text
-   Hedra Downloader PRO 2.0.exe
-   ```
+### 🍎 macOS Users:
+1. Go to **[Releases](https://github.com/HedraAleshaa/Hedra-Downloader-PRO/releases)** and download **`Hedra-Downloader-PRO-v2.0-macOS.zip`**.
+2. Unzip and drag **`Hedra Downloader PRO.app`** to your **Applications** folder.
+3. *Alternative 1-Click Launcher*: Download the repo and double-click **`run_mac.command`**.
 
 ### 3️⃣ Download Any Media
 1. Copy any video, music, or playlist URL from your browser.
-2. Paste it into the app (`Ctrl + V`).
+2. Paste it into the app (`Ctrl + V` / `Cmd + V`).
 3. Choose your desired quality and click **⬇ Download**!
 
 ---
