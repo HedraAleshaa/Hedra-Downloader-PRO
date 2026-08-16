@@ -179,14 +179,14 @@ PALETTES = {
     },
     "Pure Dark": {
         "appearance": "dark",
-        "COL_CHECK":   "#111111",
-        "COL_CHECKH":  "#000000",
+        "COL_CHECK":   "#18181B",
+        "COL_CHECKH":  "#09090B",
         "COL_DL":      "#7C3AED",
         "COL_DLH":     "#6D28D9",
         "COL_DARK":    "#000000",
         "COL_PANEL":   "#0D0D0D",
         "COL_TEXT":    "#FFFFFF",
-        "COL_MUTED":   "#6B7280",
+        "COL_MUTED":   "#9CA3AF",
         "COL_ACCENT":  "#A78BFA",
         "COL_SUCCESS": "#34D399",
         "COL_WARN":    "#FBBF24",
@@ -195,19 +195,19 @@ PALETTES = {
     },
     "Light": {
         "appearance": "light",
-        "COL_CHECK":   "#CBD5E1",
-        "COL_CHECKH":  "#94A3B8",
+        "COL_CHECK":   "#E2E8F0",
+        "COL_CHECKH":  "#CBD5E1",
         "COL_DL":      "#2563EB",
         "COL_DLH":     "#1D4ED8",
         "COL_DARK":    "#F1F5F9",
-        "COL_PANEL":   "#E2E8F0",
-        "COL_TEXT":    "#0F172A",
-        "COL_MUTED":   "#475569",
-        "COL_ACCENT":  "#2563EB",
+        "COL_PANEL":   "#FFFFFF",
+        "COL_TEXT":    "#000000",   # Solid Pitch Black Text
+        "COL_MUTED":   "#000000",   # Solid Pitch Black (NO faint gray on white)
+        "COL_ACCENT":  "#1D4ED8",
         "COL_SUCCESS": "#059669",
         "COL_WARN":    "#D97706",
         "COL_ERR":     "#DC2626",
-        "COL_FOOTER":  "#CBD5E1",
+        "COL_FOOTER":  "#E2E8F0",
     },
 }
 _ACTIVE_PALETTE = "Default"
@@ -242,14 +242,14 @@ try:
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE, "r", encoding="utf-8") as _f:
             _early = json.load(_f)
-        if _early.get("palette") in PALETTES:
-            _load_palette_tokens(_early["palette"])
+        saved_p = _early.get("palette") or _early.get("theme_mode")
+        if saved_p == "light": saved_p = "Light"
+        if saved_p == "dark": saved_p = "Default"
+        if saved_p in PALETTES:
+            _load_palette_tokens(saved_p)
 except Exception:
     pass
 
-# ==========================================
-#  THEME & WINDOW
-# ==========================================
 ctk.set_default_color_theme("blue")
 
 # ==========================================
@@ -2146,10 +2146,10 @@ def refresh_history_tab():
         def make_del_fn(idx=real_idx):
             return lambda: delete_history_entry(idx)
             
-        ctk.CTkButton(right, text="▶ Play", width=55, height=28, font=("Segoe UI", 11, "bold"), fg_color="#0F766E", hover_color="#115E59", command=make_play_fn()).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(right, text="📁 Folder", width=60, height=28, font=("Segoe UI", 11), fg_color="#1E293B", hover_color="#0F172A", command=make_folder_fn()).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(right, text="Link", width=42, height=28, font=("Segoe UI", 11), command=make_open_fn()).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(right, text="✖", width=28, height=28, font=("Segoe UI", 11), fg_color="#7F1D1D", hover_color="#450A0A", command=make_del_fn()).pack(side="left")
+        ctk.CTkButton(right, text="▶ Play", width=55, height=28, font=("Segoe UI", 11, "bold"), fg_color="#0F766E", hover_color="#115E59", text_color="#FFFFFF", command=make_play_fn()).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(right, text="📁 Folder", width=60, height=28, font=("Segoe UI", 11), fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT, command=make_folder_fn()).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(right, text="Link", width=42, height=28, font=("Segoe UI", 11), fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT, command=make_open_fn()).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(right, text="✖", width=28, height=28, font=("Segoe UI", 11), fg_color="#7F1D1D", hover_color="#450A0A", text_color="#FFFFFF", command=make_del_fn()).pack(side="left")
 
 # ==========================================
 #  UI COMPONENT BUILDERS
@@ -2171,6 +2171,7 @@ def make_info_box(parent, height=55):
 def make_check_btn(parent, text, cmd):
     b = ctk.CTkButton(parent, text=text, font=BTN_SUB,
                       fg_color=COL_CHECK, hover_color=COL_CHECKH,
+                      text_color=COL_TEXT,
                       height=34, command=cmd)
     b.pack(fill="x", padx=40, pady=(8, 2))
     MANAGED_BUTTONS.append(b)
@@ -2210,11 +2211,11 @@ def make_entry_row(parent, placeholder):
     frame = ctk.CTkFrame(parent, fg_color="transparent")
     frame.pack(fill="x", padx=20, pady=(2, 4))
     entry = ctk.CTkEntry(frame, placeholder_text=placeholder,
-                         font=ENTRY_FONT, height=38)
+                         font=ENTRY_FONT, height=38, text_color=COL_TEXT)
     entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
     ctk.CTkButton(
         frame, text="📋", width=38, height=38, font=("Segoe UI", 16),
-        fg_color=COL_CHECK, hover_color=COL_CHECKH,
+        fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
         command=lambda: paste_from_clipboard(entry)
     ).pack(side="right")
     return entry
@@ -2223,19 +2224,19 @@ def make_textbox_row(parent):
     frame = ctk.CTkFrame(parent, fg_color="transparent")
     frame.pack(fill="both", expand=True, padx=20, pady=(2, 4))
     textbox = ctk.CTkTextbox(frame, font=("Consolas", 12), fg_color=COL_DARK,
-                              height=130)
+                              text_color=COL_TEXT, height=130)
     textbox.pack(side="left", fill="both", expand=True, padx=(0, 6))
     side = ctk.CTkFrame(frame, fg_color="transparent", width=38)
     side.pack(side="right", fill="y")
     side.pack_propagate(False)
     ctk.CTkButton(
         side, text="📋", width=38, height=38, font=("Segoe UI", 16),
-        fg_color=COL_CHECK, hover_color=COL_CHECKH,
+        fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
         command=lambda: paste_to_textbox(textbox)
     ).pack(pady=(0, 4))
     ctk.CTkButton(
         side, text="✕", width=38, height=38, font=("Segoe UI", 14, "bold"),
-        fg_color="#7F1D1D", hover_color="#450A0A",
+        fg_color="#7F1D1D", hover_color="#450A0A", text_color="#FFFFFF",
         command=lambda: textbox.delete("1.0", "end")
     ).pack(pady=(4, 4))
     def _import_urls():
@@ -2253,7 +2254,7 @@ def make_textbox_row(parent):
             pass
     ctk.CTkButton(
         side, text="📂", width=38, height=38, font=("Segoe UI", 16),
-        fg_color=COL_CHECK, hover_color=COL_CHECKH,
+        fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
         command=_import_urls
     ).pack(pady=(4, 4))
 
@@ -2297,6 +2298,7 @@ def create_path_selector(parent, default_path):
         if d:
             path_var.set(d)
     ctk.CTkButton(frame, text="Browse", width=75, font=BTN_SUB,
+                  fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
                   command=browse).pack(side="right", padx=(5, 0))
     return path_var
 
@@ -2328,7 +2330,7 @@ def create_vid_options(parent):
     for label, q_target, f_target in vid_presets:
         ctk.CTkButton(
             p_row, text=label, width=88, height=22, font=("Segoe UI", 10, "bold"),
-            fg_color=COL_CHECK, hover_color=COL_CHECKH,
+            fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
             command=lambda q=q_target, f=f_target: _set_vid_preset(q, f)
         ).pack(side="left", padx=2)
 
@@ -2392,7 +2394,7 @@ def create_aud_options(parent):
     for label, q_target, f_target in aud_presets:
         ctk.CTkButton(
             p_row, text=label, width=88, height=22, font=("Segoe UI", 10, "bold"),
-            fg_color=COL_CHECK, hover_color=COL_CHECKH,
+            fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
             command=lambda q=q_target, f=f_target: _set_aud_preset(q, f)
         ).pack(side="left", padx=2)
 
@@ -2517,6 +2519,14 @@ btn_queue.pack(side="right")
 tabview = ctk.CTkTabview(app, width=920, anchor="nw",
                           command=on_tab_change)
 tabview.pack(fill="both", expand=True, pady=(6, 0), padx=10)
+tabview._segmented_button.configure(
+    font=("Segoe UI", 12, "bold"),
+    text_color=COL_TEXT,
+    unselected_color=COL_PANEL,
+    unselected_hover_color=COL_CHECK,
+    selected_color=COL_DL,
+    selected_hover_color=COL_DLH
+)
 for tab in TAB_NAMES:
     tabview.add(tab)
 
@@ -3076,55 +3086,67 @@ ctk.CTkLabel(about_frame,
 make_divider(t8_scroll)
 
 # ── Appearance section ────────────────────────────────────
-make_section_label(t8_scroll, "Appearance")
+make_section_label(t8_scroll, "Appearance & Theme")
 _pal_outer = ctk.CTkFrame(t8_scroll, fg_color=COL_PANEL, corner_radius=8)
 _pal_outer.pack(fill="x", padx=20, pady=6)
 _pal_row = ctk.CTkFrame(_pal_outer, fg_color="transparent")
 _pal_row.pack(fill="x", padx=12, pady=10)
 
-_pal_cards_dict = {}
-
 def apply_palette(name):
-    """Save palette choice and apply live appearance mode instantly without restart."""
+    """Save palette choice and restart the app for a clean re-render."""
     global _ACTIVE_PALETTE
     _ACTIVE_PALETTE = name
-    p = PALETTES.get(name, PALETTES["Default"])
-    ctk.set_appearance_mode(p["appearance"])
     try:
         save_settings()
+        save_queue()
     except Exception:
         pass
-    
-    for pname, pcard in _pal_cards_dict.items():
-        pcard.configure(border_width=2 if pname == name else 0)
-    
-    set_status(f"✔ Theme switched to {name}. Saved as default.", COL_SUCCESS, "Settings")
+
+    clean_env = os.environ.copy()
+    clean_env.pop('_MEIPASS2', None)
+    clean_env.pop('_MEIPASS', None)
+
+    try:
+        if getattr(sys, 'frozen', False):
+            subprocess.Popen([sys.executable], env=clean_env, close_fds=True)
+        else:
+            script_path = os.path.abspath(__file__) if '__file__' in globals() else "Hedra Downloader PRO.pyw"
+            subprocess.Popen([sys.executable, script_path], env=clean_env, close_fds=True)
+    except Exception:
+        pass
+
+    try:
+        app.destroy()
+    except Exception:
+        pass
+    sys.exit(0)
 
 _PAL_PREVIEWS = {
-    "Default":   ("#38BDF8", "#0B0F19", "Sky blue / Midnight"),
-    "Pure Dark": ("#A78BFA", "#000000", "Violet / OLED black"),
-    "Light":     ("#2563EB", "#F1F5F9", "Royal blue / Light"),
+    "Default":   ("#38BDF8", "#0B0F19", "Sky blue / Midnight Navy"),
+    "Pure Dark": ("#A78BFA", "#000000", "Violet / OLED Pure Black"),
+    "Light":     ("#2563EB", "#FFFFFF", "Royal Blue / Clean White (Black text)"),
 }
+
 for _pname, (_pacc, _pbg, _pdesc) in _PAL_PREVIEWS.items():
     _card = ctk.CTkFrame(_pal_row, fg_color=_pbg, corner_radius=10,
                          border_width=2 if _pname == _ACTIVE_PALETTE else 0,
                          border_color=_pacc)
-    _card.pack(side="left", padx=8, pady=6, ipadx=10, ipady=8)
-    _pal_cards_dict[_pname] = _card
+    _card.pack(side="left", padx=8, pady=6, ipadx=10, ipady=8, fill="x", expand=True)
     
     ctk.CTkLabel(_card, text=_pname, font=("Segoe UI", 12, "bold"),
-                 text_color="#FFFFFF" if _pbg != "#F1F5F9" else "#0F172A").pack(padx=12, pady=(6, 2))
+                 text_color="#FFFFFF" if _pbg != "#FFFFFF" else "#000000").pack(padx=12, pady=(6, 2))
     ctk.CTkLabel(_card, text=_pdesc, font=("Segoe UI", 9),
-                 text_color="#94A3B8" if _pbg != "#F1F5F9" else "#475569").pack(padx=12, pady=(0, 4))
-    _dot = ctk.CTkFrame(_card, width=28, height=28, corner_radius=14, fg_color=_pacc)
-    _dot.pack(pady=(0, 6))
-    ctk.CTkButton(_card, text="Apply Theme", width=120, height=28, font=BTN_SUB,
-                  fg_color=_pacc if _pbg != "#F1F5F9" else "#2563EB",
-                  hover_color="#555",
+                 text_color="#94A3B8" if _pbg != "#FFFFFF" else "#000000", wraplength=180).pack(padx=12, pady=(0, 6))
+    _dot = ctk.CTkFrame(_card, width=24, height=24, corner_radius=12, fg_color=_pacc)
+    _dot.pack(pady=(0, 8))
+    ctk.CTkButton(_card, text="Apply & Restart", width=110, height=28, font=BTN_SUB,
+                  fg_color=_pacc if _pbg != "#FFFFFF" else "#2563EB",
+                  hover_color="#1E3A8A",
+                  text_color="#FFFFFF",
                   command=lambda n=_pname: apply_palette(n)
-                  ).pack(pady=(0, 8), padx=12)
+                  ).pack(pady=(0, 6), padx=12)
 
-ctk.CTkLabel(_pal_outer, text="* Theme switches live instantly and is saved as your default.",
+ctk.CTkLabel(_pal_outer, text="* Select your theme and click Apply & Restart to apply.",
              font=("Segoe UI", 11, "italic"), text_color=COL_MUTED).pack(pady=(0, 10))
 
 make_divider(t8_scroll)
