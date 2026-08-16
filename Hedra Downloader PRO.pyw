@@ -193,22 +193,6 @@ PALETTES = {
         "COL_ERR":     "#F87171",
         "COL_FOOTER":  "#000000",
     },
-    "Light": {
-        "appearance": "light",
-        "COL_CHECK":   "#E2E8F0",
-        "COL_CHECKH":  "#CBD5E1",
-        "COL_DL":      "#2563EB",
-        "COL_DLH":     "#1D4ED8",
-        "COL_DARK":    "#F1F5F9",
-        "COL_PANEL":   "#FFFFFF",
-        "COL_TEXT":    "#000000",   # Solid Pitch Black Text
-        "COL_MUTED":   "#000000",   # Solid Pitch Black (NO faint gray on white)
-        "COL_ACCENT":  "#1D4ED8",
-        "COL_SUCCESS": "#059669",
-        "COL_WARN":    "#D97706",
-        "COL_ERR":     "#DC2626",
-        "COL_FOOTER":  "#E2E8F0",
-    },
 }
 _ACTIVE_PALETTE = "Default"
 
@@ -286,6 +270,131 @@ MANAGED_BUTTONS     = []
 _tab_status         = {name: ("Ready.", COL_MUTED) for name in TAB_NAMES}
 _session_dl_count   = 0
 _pulse_running      = False   # indeterminate progress animation flag
+_pal_cards_dict     = {}
+
+# ==========================================
+#  THEME REGISTRY & LIVE RECOLOR ENGINE
+# ==========================================
+THEME_REGISTRY = {
+    "panels": [],           # CTkFrame cards & options
+    "dark_containers": [],  # CTkScrollableFrame containers
+    "text_labels": [],      # Primary text labels
+    "muted_labels": [],     # Secondary text labels & section labels
+    "accent_labels": [],    # Accent colored labels
+    "check_btns": [],       # Utility & preset buttons
+    "dl_btns": [],          # Main download action buttons
+    "dividers": [],         # Divider lines
+    "textboxes": [],        # Batch URL textboxes
+    "info_textboxes": [],   # Info & metadata textboxes
+    "entries": [],          # Entry rows
+}
+
+def reg_widget(widget, category):
+    """Register widget for instantaneous live recoloring."""
+    if category in THEME_REGISTRY:
+        THEME_REGISTRY[category].append(widget)
+    return widget
+
+def recolor_ui_live(name):
+    """Recolor every widget in-memory across the entire application instantly."""
+    _load_palette_tokens(name)
+
+    # 1. Update Core Navigation & Footers
+    try:
+        tabview._segmented_button.configure(
+            text_color=COL_TEXT,
+            unselected_color=COL_PANEL,
+            unselected_hover_color=COL_CHECK,
+            selected_color=COL_DL,
+            selected_hover_color=COL_DLH
+        )
+    except Exception:
+        pass
+
+    try:
+        footer.configure(fg_color=COL_FOOTER)
+        progress_bar.configure(fg_color=COL_PANEL, progress_color=COL_ACCENT)
+        pct_label.configure(fg_color=COL_FOOTER, text_color=COL_ACCENT)
+        status_label.configure(text_color=COL_MUTED)
+        dl_counter_label.configure(text_color=COL_MUTED)
+        btn_queue.configure(fg_color=COL_ACCENT)
+    except Exception:
+        pass
+
+    # 2. Update Registered UI Components
+    for w in list(THEME_REGISTRY["panels"]):
+        try:
+            if w.winfo_exists(): w.configure(fg_color=COL_PANEL)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["dark_containers"]):
+        try:
+            if w.winfo_exists(): w.configure(fg_color=COL_DARK)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["text_labels"]):
+        try:
+            if w.winfo_exists(): w.configure(text_color=COL_TEXT)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["muted_labels"]):
+        try:
+            if w.winfo_exists(): w.configure(text_color=COL_MUTED)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["accent_labels"]):
+        try:
+            if w.winfo_exists(): w.configure(text_color=COL_ACCENT)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["check_btns"]):
+        try:
+            if w.winfo_exists(): w.configure(fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["dl_btns"]):
+        try:
+            if w.winfo_exists(): w.configure(fg_color=COL_DL, hover_color=COL_DLH)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["dividers"]):
+        try:
+            if w.winfo_exists(): w.configure(fg_color=COL_CHECK)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["textboxes"]):
+        try:
+            if w.winfo_exists(): w.configure(fg_color=COL_DARK, text_color=COL_TEXT)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["info_textboxes"]):
+        try:
+            if w.winfo_exists(): w.configure(fg_color=COL_DARK, text_color=COL_ACCENT)
+        except Exception: pass
+
+    for w in list(THEME_REGISTRY["entries"]):
+        try:
+            if w.winfo_exists(): w.configure(text_color=COL_TEXT)
+        except Exception: pass
+
+    # 3. Dynamic Lists / Cards Refresh
+    try:
+        refresh_history_tab()
+    except Exception:
+        pass
+    try:
+        refresh_queue_tab()
+    except Exception:
+        pass
+
+    # 4. Update Settings Tab Theme Card Highlights
+    for pname, pcard in _pal_cards_dict.items():
+        try:
+            pcard.configure(border_width=2 if pname == name else 0)
+        except Exception:
+            pass
+
+    set_status(f"✔ Theme switched to {name} live.", COL_SUCCESS, "Settings")
 
 # ==========================================
 #  ARABIC / ANY-LAYOUT PASTE FIX
@@ -2155,17 +2264,24 @@ def refresh_history_tab():
 #  UI COMPONENT BUILDERS
 # ==========================================
 def make_section_label(parent, text):
-    ctk.CTkLabel(parent, text=text, font=("Segoe UI", 13, "bold"),
-                 text_color=COL_MUTED).pack(anchor="w", padx=22, pady=(14, 2))
+    lbl = ctk.CTkLabel(parent, text=text, font=("Segoe UI", 13, "bold"),
+                       text_color=COL_MUTED)
+    lbl.pack(anchor="w", padx=22, pady=(14, 2))
+    reg_widget(lbl, "muted_labels")
+    return lbl
 
 def make_divider(parent):
-    ctk.CTkFrame(parent, height=1, fg_color=COL_CHECK).pack(fill="x", padx=20, pady=4)
+    f = ctk.CTkFrame(parent, height=1, fg_color=COL_CHECK)
+    f.pack(fill="x", padx=20, pady=4)
+    reg_widget(f, "dividers")
+    return f
 
 def make_info_box(parent, height=55):
     box = ctk.CTkTextbox(parent, height=height, state="disabled",
                          text_color=COL_ACCENT, fg_color=COL_DARK,
                          font=MONO_FONT, wrap="none")
     box.pack(fill="x", padx=20, pady=4)
+    reg_widget(box, "info_textboxes")
     return box
 
 def make_check_btn(parent, text, cmd):
@@ -2175,6 +2291,7 @@ def make_check_btn(parent, text, cmd):
                       height=34, command=cmd)
     b.pack(fill="x", padx=40, pady=(8, 2))
     MANAGED_BUTTONS.append(b)
+    reg_widget(b, "check_btns")
     return b
 
 def make_dl_btn_group(parent, text, dl_cmd, queue_cmd):
@@ -2185,6 +2302,7 @@ def make_dl_btn_group(parent, text, dl_cmd, queue_cmd):
                       height=48, command=dl_cmd)
     b1.pack(side="left", fill="x", expand=True, padx=(0, 5))
     MANAGED_BUTTONS.append(b1)
+    reg_widget(b1, "dl_btns")
     b2 = ctk.CTkButton(frame, text="➕ Add to Queue", font=BTN_MAIN,
                       fg_color="#0F766E", hover_color="#115E59",
                       height=48, command=queue_cmd)
@@ -2200,6 +2318,7 @@ def make_playlist_dl_btn_group(parent, text, dl_cmd, queue_cmd):
                       height=58, command=dl_cmd)
     b1.pack(side="left", fill="x", expand=True, padx=(0, 5))
     MANAGED_BUTTONS.append(b1)
+    reg_widget(b1, "dl_btns")
     b2 = ctk.CTkButton(frame, text="➕ Add to Queue", font=BTN_MAIN,
                       fg_color="#0F766E", hover_color="#115E59",
                       height=58, command=queue_cmd)
@@ -2213,11 +2332,14 @@ def make_entry_row(parent, placeholder):
     entry = ctk.CTkEntry(frame, placeholder_text=placeholder,
                          font=ENTRY_FONT, height=38, text_color=COL_TEXT)
     entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
-    ctk.CTkButton(
+    reg_widget(entry, "entries")
+    cp_btn = ctk.CTkButton(
         frame, text="📋", width=38, height=38, font=("Segoe UI", 16),
         fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
         command=lambda: paste_from_clipboard(entry)
-    ).pack(side="right")
+    )
+    cp_btn.pack(side="right")
+    reg_widget(cp_btn, "check_btns")
     return entry
 
 def make_textbox_row(parent):
@@ -2226,19 +2348,23 @@ def make_textbox_row(parent):
     textbox = ctk.CTkTextbox(frame, font=("Consolas", 12), fg_color=COL_DARK,
                               text_color=COL_TEXT, height=130)
     textbox.pack(side="left", fill="both", expand=True, padx=(0, 6))
+    reg_widget(textbox, "textboxes")
     side = ctk.CTkFrame(frame, fg_color="transparent", width=38)
     side.pack(side="right", fill="y")
     side.pack_propagate(False)
-    ctk.CTkButton(
+    btn_p = ctk.CTkButton(
         side, text="📋", width=38, height=38, font=("Segoe UI", 16),
         fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
         command=lambda: paste_to_textbox(textbox)
-    ).pack(pady=(0, 4))
-    ctk.CTkButton(
+    )
+    btn_p.pack(pady=(0, 4))
+    reg_widget(btn_p, "check_btns")
+    btn_x = ctk.CTkButton(
         side, text="✕", width=38, height=38, font=("Segoe UI", 14, "bold"),
         fg_color="#7F1D1D", hover_color="#450A0A", text_color="#FFFFFF",
         command=lambda: textbox.delete("1.0", "end")
-    ).pack(pady=(4, 4))
+    )
+    btn_x.pack(pady=(4, 4))
     def _import_urls():
         try:
             path = ctk.filedialog.askopenfilename(
@@ -2252,11 +2378,13 @@ def make_textbox_row(parent):
             textbox.insert("1.0", content.strip())
         except Exception:
             pass
-    ctk.CTkButton(
+    btn_o = ctk.CTkButton(
         side, text="📂", width=38, height=38, font=("Segoe UI", 16),
         fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
         command=_import_urls
-    ).pack(pady=(4, 4))
+    )
+    btn_o.pack(pady=(4, 4))
+    reg_widget(btn_o, "check_btns")
 
     def _clean_and_dedupe():
         try:
@@ -2297,19 +2425,24 @@ def create_path_selector(parent, default_path):
         d = ctk.filedialog.askdirectory(initialdir=path_var.get())
         if d:
             path_var.set(d)
-    ctk.CTkButton(frame, text="Browse", width=75, font=BTN_SUB,
+    br_btn = ctk.CTkButton(frame, text="Browse", width=75, font=BTN_SUB,
                   fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
-                  command=browse).pack(side="right", padx=(5, 0))
+                  command=browse)
+    br_btn.pack(side="right", padx=(5, 0))
+    reg_widget(br_btn, "check_btns")
     return path_var
 
 def create_vid_options(parent):
     frame = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=8)
     frame.pack(fill="x", padx=20, pady=6)
+    reg_widget(frame, "panels")
 
     # ── Preset Pill Bar ──
     p_row = ctk.CTkFrame(frame, fg_color="transparent")
     p_row.pack(fill="x", padx=12, pady=(6, 2))
-    ctk.CTkLabel(p_row, text="Presets:", font=("Segoe UI", 10, "bold"), text_color=COL_MUTED).pack(side="left", padx=(0, 6))
+    p_lbl = ctk.CTkLabel(p_row, text="Presets:", font=("Segoe UI", 10, "bold"), text_color=COL_MUTED)
+    p_lbl.pack(side="left", padx=(0, 6))
+    reg_widget(p_lbl, "muted_labels")
 
     q_var = ctk.StringVar(value="Best Available")
     fmt_var = ctk.StringVar(value="Default")
@@ -2328,11 +2461,13 @@ def create_vid_options(parent):
         ("💎 Best Quality", "Best Available", "Default"),
     ]
     for label, q_target, f_target in vid_presets:
-        ctk.CTkButton(
+        pb = ctk.CTkButton(
             p_row, text=label, width=88, height=22, font=("Segoe UI", 10, "bold"),
             fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
             command=lambda q=q_target, f=f_target: _set_vid_preset(q, f)
-        ).pack(side="left", padx=2)
+        )
+        pb.pack(side="left", padx=2)
+        reg_widget(pb, "check_btns")
 
     # Row 1: Quality | Format | Subtitles
     row1 = ctk.CTkFrame(frame, fg_color="transparent")
@@ -2370,11 +2505,14 @@ def create_vid_options(parent):
 def create_aud_options(parent):
     frame = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=8)
     frame.pack(fill="x", padx=20, pady=6)
+    reg_widget(frame, "panels")
 
     # ── Preset Pill Bar ──
     p_row = ctk.CTkFrame(frame, fg_color="transparent")
     p_row.pack(fill="x", padx=12, pady=(6, 2))
-    ctk.CTkLabel(p_row, text="Presets:", font=("Segoe UI", 10, "bold"), text_color=COL_MUTED).pack(side="left", padx=(0, 6))
+    p_lbl = ctk.CTkLabel(p_row, text="Presets:", font=("Segoe UI", 10, "bold"), text_color=COL_MUTED)
+    p_lbl.pack(side="left", padx=(0, 6))
+    reg_widget(p_lbl, "muted_labels")
 
     q_var = ctk.StringVar(value="Best — Highest bitrate")
     fmt_var = ctk.StringVar(value="mp3")
@@ -2392,11 +2530,13 @@ def create_aud_options(parent):
         ("🍎 M4A Apple", "Best — Highest bitrate", "m4a"),
     ]
     for label, q_target, f_target in aud_presets:
-        ctk.CTkButton(
+        pb = ctk.CTkButton(
             p_row, text=label, width=88, height=22, font=("Segoe UI", 10, "bold"),
             fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
             command=lambda q=q_target, f=f_target: _set_aud_preset(q, f)
-        ).pack(side="left", padx=2)
+        )
+        pb.pack(side="left", padx=2)
+        reg_widget(pb, "check_btns")
 
     # Row 1: Quality | Format
     row1 = ctk.CTkFrame(frame, fg_color="transparent")
@@ -3049,6 +3189,7 @@ t8_scroll.pack(fill="both", expand=True, padx=0, pady=0)
 make_section_label(t8_scroll, "About")
 about_frame = ctk.CTkFrame(t8_scroll, fg_color=COL_PANEL, corner_radius=10)
 about_frame.pack(fill="x", padx=20, pady=(4, 8))
+reg_widget(about_frame, "panels")
 
 # Display App Logo in About Card
 _logo_png = os.path.join(os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(), "icon.png")
@@ -3066,22 +3207,33 @@ if PIL_AVAILABLE and os.path.isfile(_logo_png):
     except Exception:
         pass
 
-ctk.CTkLabel(about_frame,
+_about_title = ctk.CTkLabel(about_frame,
     text=f"Hedra Downloader PRO {APP_VERSION}",
     font=("Segoe UI", 15, "bold"), text_color=COL_TEXT
-).pack(pady=(4, 2))
-ctk.CTkLabel(about_frame,
+)
+_about_title.pack(pady=(4, 2))
+reg_widget(_about_title, "text_labels")
+
+_about_author = ctk.CTkLabel(about_frame,
     text=f"Made by  {APP_AUTHOR}",
     font=("Segoe UI", 12, "bold"), text_color=COL_ACCENT
-).pack(pady=(0, 4))
-ctk.CTkLabel(about_frame,
+)
+_about_author.pack(pady=(0, 4))
+reg_widget(_about_author, "accent_labels")
+
+_about_desc = ctk.CTkLabel(about_frame,
     text="Powered by yt-dlp  •  FFmpeg  •  customtkinter",
     font=("Segoe UI", 11), text_color=COL_MUTED
-).pack(pady=(0, 4))
-ctk.CTkLabel(about_frame,
+)
+_about_desc.pack(pady=(0, 4))
+reg_widget(_about_desc, "muted_labels")
+
+_about_path = ctk.CTkLabel(about_frame,
     text=f"Downloads → {BASE_DIR}",
     font=("Consolas", 10), text_color=COL_MUTED
-).pack(pady=(0, 12))
+)
+_about_path.pack(pady=(0, 12))
+reg_widget(_about_path, "muted_labels")
 
 make_divider(t8_scroll)
 
@@ -3089,42 +3241,24 @@ make_divider(t8_scroll)
 make_section_label(t8_scroll, "Appearance & Theme")
 _pal_outer = ctk.CTkFrame(t8_scroll, fg_color=COL_PANEL, corner_radius=8)
 _pal_outer.pack(fill="x", padx=20, pady=6)
+reg_widget(_pal_outer, "panels")
+
 _pal_row = ctk.CTkFrame(_pal_outer, fg_color="transparent")
 _pal_row.pack(fill="x", padx=12, pady=10)
 
 def apply_palette(name):
-    """Save palette choice and restart the app for a clean re-render."""
+    """Save palette choice and apply live in-memory instantly."""
     global _ACTIVE_PALETTE
     _ACTIVE_PALETTE = name
     try:
         save_settings()
-        save_queue()
     except Exception:
         pass
-
-    clean_env = os.environ.copy()
-    clean_env.pop('_MEIPASS2', None)
-    clean_env.pop('_MEIPASS', None)
-
-    try:
-        if getattr(sys, 'frozen', False):
-            subprocess.Popen([sys.executable], env=clean_env, close_fds=True)
-        else:
-            script_path = os.path.abspath(__file__) if '__file__' in globals() else "Hedra Downloader PRO.pyw"
-            subprocess.Popen([sys.executable, script_path], env=clean_env, close_fds=True)
-    except Exception:
-        pass
-
-    try:
-        app.destroy()
-    except Exception:
-        pass
-    sys.exit(0)
+    recolor_ui_live(name)
 
 _PAL_PREVIEWS = {
     "Default":   ("#38BDF8", "#0B0F19", "Sky blue / Midnight Navy"),
     "Pure Dark": ("#A78BFA", "#000000", "Violet / OLED Pure Black"),
-    "Light":     ("#2563EB", "#FFFFFF", "Royal Blue / Clean White (Black text)"),
 }
 
 for _pname, (_pacc, _pbg, _pdesc) in _PAL_PREVIEWS.items():
@@ -3132,27 +3266,31 @@ for _pname, (_pacc, _pbg, _pdesc) in _PAL_PREVIEWS.items():
                          border_width=2 if _pname == _ACTIVE_PALETTE else 0,
                          border_color=_pacc)
     _card.pack(side="left", padx=8, pady=6, ipadx=10, ipady=8, fill="x", expand=True)
+    _pal_cards_dict[_pname] = _card
     
     ctk.CTkLabel(_card, text=_pname, font=("Segoe UI", 12, "bold"),
-                 text_color="#FFFFFF" if _pbg != "#FFFFFF" else "#000000").pack(padx=12, pady=(6, 2))
+                 text_color="#FFFFFF").pack(padx=12, pady=(6, 2))
     ctk.CTkLabel(_card, text=_pdesc, font=("Segoe UI", 9),
-                 text_color="#94A3B8" if _pbg != "#FFFFFF" else "#000000", wraplength=180).pack(padx=12, pady=(0, 6))
+                 text_color="#94A3B8", wraplength=180).pack(padx=12, pady=(0, 6))
     _dot = ctk.CTkFrame(_card, width=24, height=24, corner_radius=12, fg_color=_pacc)
     _dot.pack(pady=(0, 8))
-    ctk.CTkButton(_card, text="Apply & Restart", width=110, height=28, font=BTN_SUB,
-                  fg_color=_pacc if _pbg != "#FFFFFF" else "#2563EB",
+    ctk.CTkButton(_card, text="Apply Theme", width=110, height=28, font=BTN_SUB,
+                  fg_color=_pacc,
                   hover_color="#1E3A8A",
                   text_color="#FFFFFF",
                   command=lambda n=_pname: apply_palette(n)
                   ).pack(pady=(0, 6), padx=12)
 
-ctk.CTkLabel(_pal_outer, text="* Select your theme and click Apply & Restart to apply.",
-             font=("Segoe UI", 11, "italic"), text_color=COL_MUTED).pack(pady=(0, 10))
+_pal_hint = ctk.CTkLabel(_pal_outer, text="* Theme switches live instantly without restarting and is saved as your default.",
+             font=("Segoe UI", 11, "italic"), text_color=COL_MUTED)
+_pal_hint.pack(pady=(0, 10))
+reg_widget(_pal_hint, "muted_labels")
 
 make_divider(t8_scroll)
 make_section_label(t8_scroll, "Supported Websites")
 websites_frame = ctk.CTkFrame(t8_scroll, fg_color=COL_PANEL, corner_radius=8)
 websites_frame.pack(fill="x", padx=20, pady=6)
+reg_widget(websites_frame, "panels")
 
 # ── Logo badge grid ──────────────────────────────────────────────
 _sites_grid = ctk.CTkFrame(websites_frame, fg_color="transparent")
@@ -3187,6 +3325,7 @@ make_divider(t8_scroll)
 make_section_label(t8_scroll, "Tab guide")
 tab_guide_frame = ctk.CTkFrame(t8_scroll, fg_color=COL_PANEL, corner_radius=8)
 tab_guide_frame.pack(fill="x", padx=20, pady=6)
+reg_widget(tab_guide_frame, "panels")
 
 TAB_DESCRIPTIONS = [
     ("Single Video",   "Download one video from any URL. Check size and preview thumbnail first."),
@@ -3203,16 +3342,21 @@ TAB_DESCRIPTIONS = [
 for i, (tab_name, desc) in enumerate(TAB_DESCRIPTIONS):
     row = ctk.CTkFrame(tab_guide_frame, fg_color="transparent")
     row.pack(fill="x", padx=12, pady=(8 if i == 0 else 4, 4 if i < len(TAB_DESCRIPTIONS)-1 else 10))
-    ctk.CTkLabel(row, text=f"{tab_name}:", font=("Segoe UI", 12, "bold"),
-                 text_color=COL_MUTED, width=130, anchor="w").pack(side="left", padx=(0, 8))
-    ctk.CTkLabel(row, text=desc, font=("Segoe UI", 11),
+    _tg_lbl = ctk.CTkLabel(row, text=f"{tab_name}:", font=("Segoe UI", 12, "bold"),
+                 text_color=COL_MUTED, width=130, anchor="w")
+    _tg_lbl.pack(side="left", padx=(0, 8))
+    reg_widget(_tg_lbl, "muted_labels")
+    _tg_desc = ctk.CTkLabel(row, text=desc, font=("Segoe UI", 11),
                  text_color=COL_MUTED, anchor="w", wraplength=540,
-                 justify="left").pack(side="left", fill="x", expand=True)
+                 justify="left")
+    _tg_desc.pack(side="left", fill="x", expand=True)
+    reg_widget(_tg_desc, "muted_labels")
 
 make_divider(t8_scroll)
 make_section_label(t8_scroll, "Global download settings")
 gset = ctk.CTkFrame(t8_scroll, fg_color=COL_PANEL, corner_radius=8)
 gset.pack(fill="x", padx=20, pady=6)
+reg_widget(gset, "panels")
 
 gr1 = ctk.CTkFrame(gset, fg_color="transparent")
 gr1.pack(fill="x", padx=12, pady=(10, 4))
@@ -3267,10 +3411,15 @@ def _paste_cookie_clipboard():
 def _clear_cookie_file():
     global_cookie_file_var.set("")
 
-ctk.CTkButton(gr1b, text="Browse", width=65, font=BTN_SUB, command=_browse_cookie_file).pack(side="left", padx=(0, 4))
-ctk.CTkButton(gr1b, text="📋 Paste", width=65, font=BTN_SUB, fg_color="#0F766E", hover_color="#115E59", command=_paste_cookie_clipboard).pack(side="left", padx=(0, 4))
-ctk.CTkButton(gr1b, text="✕", width=28, font=("Segoe UI", 12, "bold"), fg_color="#7F1D1D", hover_color="#450A0A", command=_clear_cookie_file).pack(side="left", padx=(0, 10))
-ctk.CTkLabel(gr1b, text="💡 Export via 'Get cookies.txt' extension to bypass Windows Chrome DPAPI lock", font=("Segoe UI", 10), text_color=COL_MUTED).pack(side="left")
+_btn_bcook = ctk.CTkButton(gr1b, text="Browse", width=65, font=BTN_SUB, fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT, command=_browse_cookie_file)
+_btn_bcook.pack(side="left", padx=(0, 4))
+reg_widget(_btn_bcook, "check_btns")
+
+ctk.CTkButton(gr1b, text="📋 Paste", width=65, font=BTN_SUB, fg_color="#0F766E", hover_color="#115E59", text_color="#FFFFFF", command=_paste_cookie_clipboard).pack(side="left", padx=(0, 4))
+ctk.CTkButton(gr1b, text="✕", width=28, font=("Segoe UI", 12, "bold"), fg_color="#7F1D1D", hover_color="#450A0A", text_color="#FFFFFF", command=_clear_cookie_file).pack(side="left", padx=(0, 10))
+_lbl_cook_hint = ctk.CTkLabel(gr1b, text="💡 Export via 'Get cookies.txt' extension to bypass Windows Chrome DPAPI lock", font=("Segoe UI", 10), text_color=COL_MUTED)
+_lbl_cook_hint.pack(side="left")
+reg_widget(_lbl_cook_hint, "muted_labels")
 
 gr2 = ctk.CTkFrame(gset, fg_color="transparent")
 gr2.pack(fill="x", padx=12, pady=(4, 4))
@@ -3278,8 +3427,10 @@ ctk.CTkLabel(gr2, text="Connections:", font=LABEL_FONT).pack(side="left", padx=(
 global_concurrent_var = ctk.StringVar(value="4")
 ctk.CTkOptionMenu(gr2, variable=global_concurrent_var, width=70,
                   values=[str(i) for i in range(1, 9)]).pack(side="left", padx=(0, 20))
-ctk.CTkLabel(gr2, text="(parallel fragment downloads — higher = faster for DASH/HLS)",
-             font=("Segoe UI", 10), text_color=COL_MUTED).pack(side="left")
+_lbl_con_hint = ctk.CTkLabel(gr2, text="(parallel fragment downloads — higher = faster for DASH/HLS)",
+             font=("Segoe UI", 10), text_color=COL_MUTED)
+_lbl_con_hint.pack(side="left")
+reg_widget(_lbl_con_hint, "muted_labels")
 
 gr2b = ctk.CTkFrame(gset, fg_color="transparent")
 gr2b.pack(fill="x", padx=12, pady=(0, 4))
@@ -3287,8 +3438,10 @@ ctk.CTkLabel(gr2b, text="Proxy:", font=LABEL_FONT).pack(side="left", padx=(0, 5)
 global_proxy_entry = ctk.CTkEntry(gr2b, width=220, font=ENTRY_FONT,
                                    placeholder_text="e.g. socks5://127.0.0.1:1080")
 global_proxy_entry.pack(side="left", padx=(0, 14))
-ctk.CTkLabel(gr2b, text="HTTP or SOCKS5 — leave blank for direct",
-             font=("Segoe UI", 10), text_color=COL_MUTED).pack(side="left")
+_lbl_prox_hint = ctk.CTkLabel(gr2b, text="HTTP or SOCKS5 — leave blank for direct",
+             font=("Segoe UI", 10), text_color=COL_MUTED)
+_lbl_prox_hint.pack(side="left")
+reg_widget(_lbl_prox_hint, "muted_labels")
 
 gr3 = ctk.CTkFrame(gset, fg_color="transparent")
 gr3.pack(fill="x", padx=12, pady=(0, 6))
@@ -3316,6 +3469,7 @@ make_divider(t8_scroll)
 make_section_label(t8_scroll, "Advanced Integrations")
 adv_set = ctk.CTkFrame(t8_scroll, fg_color=COL_PANEL, corner_radius=14)
 adv_set.pack(fill="x", padx=20, pady=6)
+reg_widget(adv_set, "panels")
 
 global_sponsorblock_var = ctk.BooleanVar(value=False)
 global_metadata_var = ctk.BooleanVar(value=True)
