@@ -10,6 +10,7 @@ import json
 import urllib.request
 import io
 import re
+import hashlib
 import tkinter as tk
 from tkinter import messagebox
 import webbrowser
@@ -101,14 +102,14 @@ except Exception:
 #  CONSTANTS
 # ==========================================
 VIDEO_QUALITY_MAP = {
-    "Max 8K (4320p)": "bestvideo[height<=4320]+bestaudio/best",
-    "Max 4K (2160p)": "bestvideo[height<=2160]+bestaudio/best",
-    "Max 1440p":      "bestvideo[height<=1440]+bestaudio/best",
+    "Max 8K (4320p)": "bestvideo[height<=4320]+bestaudio/bestvideo[width<=4320]+bestaudio/best[height<=4320]/best[width<=4320]/bestvideo+bestaudio/best",
+    "Max 4K (2160p)": "bestvideo[height<=2160]+bestaudio/bestvideo[width<=2160]+bestaudio/best[height<=2160]/best[width<=2160]/bestvideo+bestaudio/best",
+    "Max 1440p":      "bestvideo[height<=1440]+bestaudio/bestvideo[width<=1440]+bestaudio/best[height<=1440]/best[width<=1440]/bestvideo+bestaudio/best",
     "Best Available": "bestvideo+bestaudio/best",
-    "Max 1080p":      "bestvideo[height<=1080]+bestaudio/best",
-    "Max 720p":       "bestvideo[height<=720]+bestaudio/best",
-    "Max 480p":       "bestvideo[height<=480]+bestaudio/best",
-    "Max 360p":       "bestvideo[height<=360]+bestaudio/best",
+    "Max 1080p":      "bestvideo[height<=1080]+bestaudio/bestvideo[width<=1080]+bestaudio/best[height<=1080]/best[width<=1080]/bestvideo+bestaudio/best",
+    "Max 720p":       "bestvideo[height<=720]+bestaudio/bestvideo[width<=720]+bestaudio/best[height<=720]/best[width<=720]/bestvideo+bestaudio/best",
+    "Max 480p":       "bestvideo[height<=480]+bestaudio/bestvideo[width<=480]+bestaudio/best[height<=480]/best[width<=480]/bestvideo+bestaudio/best",
+    "Max 360p":       "bestvideo[height<=360]+bestaudio/bestvideo[width<=360]+bestaudio/best[height<=360]/best[width<=360]/bestvideo+bestaudio/best",
 }
 AUDIO_BITRATE_MAP = {
     "Best — Highest bitrate": 256,
@@ -1180,6 +1181,7 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
         'format':          fmt,
         'noplaylist':      items_list is None,
         'ffmpeg_location': FFMPEG_DIR,
+        'windowsfilenames': True,
         'nocolor':         True,
         'ignoreerrors':    False,
     }
@@ -1189,10 +1191,10 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
     if items_list:
         opts['playlist_items'] = items_list
         opts['outtmpl'] = os.path.join(
-            target_dir, '%(playlist_title)s',
-            '%(playlist_index)02d - %(title)s.%(ext)s')
+            target_dir, '%(playlist_title).100s',
+            '%(playlist_index)02d - %(title).120s.%(ext)s')
     else:
-        opts['outtmpl'] = os.path.join(target_dir, '%(title)s.%(ext)s')
+        opts['outtmpl'] = os.path.join(target_dir, '%(title).150s.%(ext)s')
 
     if not for_analysis:
         opts['progress_hooks'] = [progress_hook]
@@ -1254,6 +1256,7 @@ def get_audio_opts(q_var, fmt_var, target_dir,
         'format':          'bestaudio/best',
         'noplaylist':      items_list is None,
         'ffmpeg_location': FFMPEG_DIR,
+        'windowsfilenames': True,
         'nocolor':         True,
         'ignoreerrors':    False,
     }
@@ -1263,10 +1266,10 @@ def get_audio_opts(q_var, fmt_var, target_dir,
     if items_list:
         opts['playlist_items'] = items_list
         opts['outtmpl'] = os.path.join(
-            target_dir, '%(playlist_title)s',
-            '%(playlist_index)02d - %(title)s.%(ext)s')
+            target_dir, '%(playlist_title).100s',
+            '%(playlist_index)02d - %(title).120s.%(ext)s')
     else:
-        opts['outtmpl'] = os.path.join(target_dir, '%(title)s.%(ext)s')
+        opts['outtmpl'] = os.path.join(target_dir, '%(title).150s.%(ext)s')
 
     if not for_analysis:
         opts['progress_hooks'] = [progress_hook]
@@ -1737,7 +1740,9 @@ class JobQueue:
                     except Exception:
                         pass
                         
-                    best_thumb = info.get("thumbnail") if isinstance(info, dict) else ""
+                    _, best_thumb = extract_better_metadata(info if isinstance(info, dict) else {}, title)
+                    if not best_thumb and isinstance(info, dict):
+                        best_thumb = info.get("thumbnail") or ""
                     save_history_entry(title, link, job["mode"], sz_str, job.get("quality", "—"), job.get("file_type", "—"), file_path=fpath, thumbnail=best_thumb)
             
             app.after(0, _increment_session_counter)
@@ -2124,10 +2129,11 @@ _history_thumb_cache = {}
 def get_history_thumbnail(item_dict, label_widget):
     """
     Fetch and display a compact 64×36 thumbnail for History items with:
-    1. Memory caching
-    2. Local file frame extraction via FFmpeg (for past & offline files on disk)
+    1. SHA-256 collision-proof disk and memory caching
+    2. Thread-safe widget tag verification (prevents thumbnail swap on scroll/re-render)
     3. URL download & caching (for online artwork)
-    4. Clean fallback icon
+    4. Local file frame extraction via FFmpeg (for offline/local files on disk)
+    5. Clean fallback icon
     """
     if not PIL_AVAILABLE:
         icon = "🎵" if "Audio" in item_dict.get("mode", "") else "🎬"
@@ -2137,8 +2143,15 @@ def get_history_thumbnail(item_dict, label_widget):
     thumb_url = item_dict.get("thumbnail", "")
     file_path = item_dict.get("file_path", "")
     title = item_dict.get("title", "")
+    url = item_dict.get("url", "")
     mode = item_dict.get("mode", "Video")
-    cache_key = thumb_url or file_path or title or "item"
+
+    # Generate collision-free SHA-256 hash from entire unique metadata seed
+    unique_seed = f"{thumb_url}|{file_path}|{url}|{title}"
+    cache_key = hashlib.sha256(unique_seed.encode('utf-8', errors='ignore')).hexdigest()
+    
+    # Tag widget with current request key to prevent async thread overwriting wrong row
+    label_widget._req_key = cache_key
 
     # 1. In-memory cache hit
     if cache_key in _history_thumb_cache:
@@ -2152,8 +2165,7 @@ def get_history_thumbnail(item_dict, label_widget):
 
     def _async_process():
         img = None
-        safe_key = "".join(c for c in cache_key if c.isalnum())[:32] or "thumb"
-        disk_cache_file = os.path.join(THUMBS_DIR, f"{safe_key}.jpg")
+        disk_cache_file = os.path.join(THUMBS_DIR, f"{cache_key}.jpg")
 
         if os.path.isfile(disk_cache_file):
             try:
@@ -2215,9 +2227,9 @@ def get_history_thumbnail(item_dict, label_widget):
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(64, 36))
             _history_thumb_cache[cache_key] = ctk_img
             
-            def _apply():
+            def _apply(expected_key=cache_key):
                 try:
-                    if label_widget.winfo_exists():
+                    if label_widget.winfo_exists() and getattr(label_widget, '_req_key', None) == expected_key:
                         label_widget._img_ref = ctk_img
                         label_widget.configure(image=ctk_img, text="")
                 except Exception:
