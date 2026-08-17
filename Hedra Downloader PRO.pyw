@@ -645,23 +645,79 @@ def get_audio_bitrate(q_var):
     return AUDIO_BITRATE_MAP.get(q_var.get(), 256)
 
 def extract_size_from_info(info, is_audio=False, audio_bitrate=None):
-    sz = 0
+    if not info:
+        return 0
     if 'entries' in info:
         total = 0
         for entry in info['entries']:
             if entry:
                 total += extract_size_from_info(entry, is_audio, audio_bitrate)
         return total
-    if is_audio and audio_bitrate and info.get('duration'):
-        sz = int((audio_bitrate * 1000 * info['duration']) / 8)
-    elif 'requested_formats' in info:
-        sz = sum(f.get('filesize', 0) or f.get('filesize_approx', 0)
+
+    duration = info.get('duration')
+
+    # 1. Direct filesize if reported
+    if 'requested_formats' in info:
+        sz = sum(f.get('filesize', 0) or f.get('filesize_approx', 0) or 0
                  for f in info['requested_formats'])
-        if sz <= 0:
-            sz = info.get('filesize', 0) or info.get('filesize_approx', 0)
-    else:
-        sz = info.get('filesize', 0) or info.get('filesize_approx', 0)
-    return sz
+        if sz > 0:
+            return sz
+    sz = info.get('filesize', 0) or info.get('filesize_approx', 0) or 0
+    if sz > 0:
+        return sz
+
+    # 2. Estimate from stream bitrates (vbr, abr, tbr) and duration (Facebook, Instagram, TikTok)
+    formats = info.get('formats', [])
+    if formats:
+        best_v = None
+        best_a = None
+        best_combo = None
+        for f in formats:
+            v_ok = f.get('vcodec') not in ('none', None)
+            a_ok = f.get('acodec') not in ('none', None)
+            if v_ok and a_ok:
+                if not best_combo or (f.get('tbr') or 0) > (best_combo.get('tbr') or 0):
+                    best_combo = f
+            elif v_ok:
+                if not best_v or (f.get('vbr') or f.get('tbr') or 0) > (best_v.get('vbr') or best_v.get('tbr') or 0):
+                    best_v = f
+            elif a_ok:
+                if not best_a or (f.get('abr') or f.get('tbr') or 0) > (best_a.get('abr') or best_a.get('tbr') or 0):
+                    best_a = f
+
+        total_bitrate = 0
+        if is_audio:
+            total_bitrate = audio_bitrate or (best_a.get('abr') if best_a else None) or (best_a.get('tbr') if best_a else 128)
+        else:
+            if best_combo and best_combo.get('tbr'):
+                total_bitrate = best_combo.get('tbr')
+            else:
+                v_rate = (best_v.get('vbr') or best_v.get('tbr') or 0) if best_v else 0
+                a_rate = (best_a.get('abr') or best_a.get('tbr') or 0) if best_a else (audio_bitrate or 128)
+                total_bitrate = v_rate + a_rate
+
+        if duration and total_bitrate:
+            return int((total_bitrate * 1000 * duration) / 8)
+
+        # 3. HTTP Range probe on direct stream URL
+        target_f = best_a if is_audio else (best_combo or best_v)
+        if target_f and target_f.get('url'):
+            try:
+                req = urllib.request.Request(
+                    target_f['url'],
+                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Range': 'bytes=0-0'}
+                )
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    cr = resp.headers.get('Content-Range')
+                    if cr and '/' in cr:
+                        return int(cr.split('/')[-1])
+                    cl = resp.headers.get('Content-Length')
+                    if cl:
+                        return int(cl)
+            except Exception:
+                pass
+
+    return 0
 
 def normalize_media_url(url):
     """Normalize and clean various site URLs (TikTok, Twitter/X, Instagram, Facebook, Reddit, Pinterest, YouTube Music)."""
