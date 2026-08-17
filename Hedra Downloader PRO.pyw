@@ -98,18 +98,41 @@ try:
 except Exception:
     pass
 
-# ==========================================
-#  CONSTANTS
-# ==========================================
+QUALITY_HEIGHT_MAP = {
+    "Max 8K (4320p)": 4320,
+    "Max 4K (2160p)": 2160,
+    "Max 1440p":      1440,
+    "Max 1080p":      1080,
+    "Max 720p":       720,
+    "Max 480p":       480,
+    "Max 360p":       360,
+}
+
+def build_video_format_selector(q_name):
+    target_res = QUALITY_HEIGHT_MAP.get(q_name)
+    if not target_res or q_name == "Best Available":
+        return "bestvideo+bestaudio/best"
+    long_res = int(target_res * 16 / 9) + 80
+    return (
+        f"bestvideo[height<={target_res}][width<={long_res}]+bestaudio/"
+        f"bestvideo[width<={target_res}][height<={long_res}]+bestaudio/"
+        f"best[height<={target_res}][width<={long_res}]/"
+        f"best[width<={target_res}][height<={long_res}]/"
+        f"bestvideo[height<={target_res}]+bestaudio/"
+        f"bestvideo[width<={target_res}]+bestaudio/"
+        f"best[height<={target_res}]/best[width<={target_res}]/"
+        f"sd/best"
+    )
+
 VIDEO_QUALITY_MAP = {
-    "Max 8K (4320p)": "bestvideo[height<=4320]+bestaudio/bestvideo[width<=4320]+bestaudio/best[height<=4320]/best[width<=4320]/bestvideo+bestaudio/best",
-    "Max 4K (2160p)": "bestvideo[height<=2160]+bestaudio/bestvideo[width<=2160]+bestaudio/best[height<=2160]/best[width<=2160]/bestvideo+bestaudio/best",
-    "Max 1440p":      "bestvideo[height<=1440]+bestaudio/bestvideo[width<=1440]+bestaudio/best[height<=1440]/best[width<=1440]/bestvideo+bestaudio/best",
     "Best Available": "bestvideo+bestaudio/best",
-    "Max 1080p":      "bestvideo[height<=1080]+bestaudio/bestvideo[width<=1080]+bestaudio/best[height<=1080]/best[width<=1080]/bestvideo+bestaudio/best",
-    "Max 720p":       "bestvideo[height<=720]+bestaudio/bestvideo[width<=720]+bestaudio/best[height<=720]/best[width<=720]/bestvideo+bestaudio/best",
-    "Max 480p":       "bestvideo[height<=480]+bestaudio/bestvideo[width<=480]+bestaudio/best[height<=480]/best[width<=480]/bestvideo+bestaudio/best",
-    "Max 360p":       "bestvideo[height<=360]+bestaudio/bestvideo[width<=360]+bestaudio/best[height<=360]/best[width<=360]/bestvideo+bestaudio/best",
+    "Max 8K (4320p)": build_video_format_selector("Max 8K (4320p)"),
+    "Max 4K (2160p)": build_video_format_selector("Max 4K (2160p)"),
+    "Max 1440p":      build_video_format_selector("Max 1440p"),
+    "Max 1080p":      build_video_format_selector("Max 1080p"),
+    "Max 720p":       build_video_format_selector("Max 720p"),
+    "Max 480p":       build_video_format_selector("Max 480p"),
+    "Max 360p":       build_video_format_selector("Max 360p"),
 }
 AUDIO_BITRATE_MAP = {
     "Best — Highest bitrate": 256,
@@ -645,15 +668,15 @@ def format_seconds_to_time(seconds):
 def get_audio_bitrate(q_var):
     return AUDIO_BITRATE_MAP.get(q_var.get(), 256)
 
-QUALITY_HEIGHT_MAP = {
-    "Max 8K (4320p)": 4320,
-    "Max 4K (2160p)": 2160,
-    "Max 1440p":      1440,
-    "Max 1080p":      1080,
-    "Max 720p":       720,
-    "Max 480p":       480,
-    "Max 360p":       360,
-}
+def is_within_resolution(w, h, max_res):
+    if not max_res or max_res >= 99999:
+        return True
+    if not w and not h:
+        return True
+    short_dim = min(w, h) if (w and h) else (h or w)
+    long_dim = max(w, h) if (w and h) else (h or w)
+    max_long = int(max_res * 16 / 9) + 80
+    return (short_dim <= max_res and long_dim <= max_long)
 
 def extract_size_from_info(info, is_audio=False, audio_bitrate=None, target_quality=None):
     if not info:
@@ -666,15 +689,15 @@ def extract_size_from_info(info, is_audio=False, audio_bitrate=None, target_qual
         return total
 
     duration = info.get('duration')
-    max_h = QUALITY_HEIGHT_MAP.get(target_quality, 99999) if target_quality else 99999
+    target_res = QUALITY_HEIGHT_MAP.get(target_quality) if target_quality else None
 
-    # 1. Direct filesize if reported
-    if 'requested_formats' in info and (target_quality is None or target_quality == "Best Available"):
-        sz = sum(f.get('filesize', 0) or f.get('filesize_approx', 0) or 0
-                 for f in info['requested_formats'])
-        if sz > 0:
-            return sz
-    if (target_quality is None or target_quality == "Best Available"):
+    # 1. Direct filesize if reported for Best Available
+    if target_res is None or target_quality == "Best Available":
+        if 'requested_formats' in info:
+            sz = sum(f.get('filesize', 0) or f.get('filesize_approx', 0) or 0
+                     for f in info['requested_formats'])
+            if sz > 0:
+                return sz
         sz = info.get('filesize', 0) or info.get('filesize_approx', 0) or 0
         if sz > 0:
             return sz
@@ -682,60 +705,46 @@ def extract_size_from_info(info, is_audio=False, audio_bitrate=None, target_qual
     # 2. Estimate from stream bitrates (vbr, abr, tbr) and duration (Facebook, Instagram, TikTok)
     formats = info.get('formats', [])
     if formats:
+        # Find best audio bitrate
+        a_rate = audio_bitrate or 0
+        for f in formats:
+            if f.get('acodec') not in ('none', None):
+                a_rate = max(a_rate, f.get('abr') or f.get('tbr') or 48)
+        if not a_rate:
+            a_rate = 128
+
+        if is_audio:
+            return int((a_rate * 1000 * duration) / 8) if duration else 0
+
         best_v = None
-        best_a = None
         best_combo = None
         for f in formats:
             v_ok = f.get('vcodec') not in ('none', None)
             a_ok = f.get('acodec') not in ('none', None)
-            h = f.get('height') or 0
             w = f.get('width') or 0
-            dim = min(w, h) if (w and h) else h
-            within_res = (dim <= max_h or h <= max_h) if (v_ok and max_h < 99999) else True
+            h = f.get('height') or 0
+            within = is_within_resolution(w, h, target_res)
 
-            if v_ok and a_ok and within_res:
-                if not best_combo or (f.get('tbr') or 0) > (best_combo.get('tbr') or 0):
-                    best_combo = f
-            elif v_ok and within_res:
-                if not best_v or (f.get('vbr') or f.get('tbr') or 0) > (best_v.get('vbr') or best_v.get('tbr') or 0):
-                    best_v = f
-            elif a_ok:
-                if not best_a or (f.get('abr') or f.get('tbr') or 0) > (best_a.get('abr') or best_a.get('tbr') or 0):
-                    best_a = f
+            if within:
+                if v_ok and a_ok:
+                    tbr = f.get('tbr') or 0
+                    if not best_combo or tbr > (best_combo.get('tbr') or 0):
+                        best_combo = f
+                elif v_ok:
+                    vbr = f.get('vbr') or f.get('tbr') or 0
+                    if not best_v or vbr > (best_v.get('vbr') or best_v.get('tbr') or 0):
+                        best_v = f
 
-        total_bitrate = 0
-        if is_audio:
-            total_bitrate = audio_bitrate or (best_a.get('abr') if best_a else None) or (best_a.get('tbr') if best_a else 128)
+        if best_combo and best_combo.get('tbr'):
+            total_bitrate = best_combo.get('tbr')
         else:
-            if best_combo and best_combo.get('tbr'):
-                total_bitrate = best_combo.get('tbr')
-            else:
-                v_rate = (best_v.get('vbr') or best_v.get('tbr') or 0) if best_v else 0
-                a_rate = (best_a.get('abr') or best_a.get('tbr') or 0) if best_a else (audio_bitrate or 128)
-                total_bitrate = v_rate + a_rate
+            v_rate = (best_v.get('vbr') or best_v.get('tbr') or 0) if best_v else 0
+            total_bitrate = v_rate + a_rate
 
         if duration and total_bitrate:
             return int((total_bitrate * 1000 * duration) / 8)
 
-        # 3. HTTP Range probe on direct stream URL
-        target_f = best_a if is_audio else (best_combo or best_v)
-        if target_f and target_f.get('url'):
-            try:
-                req = urllib.request.Request(
-                    target_f['url'],
-                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Range': 'bytes=0-0'}
-                )
-                with urllib.request.urlopen(req, timeout=3) as resp:
-                    cr = resp.headers.get('Content-Range')
-                    if cr and '/' in cr:
-                        return int(cr.split('/')[-1])
-                    cl = resp.headers.get('Content-Length')
-                    if cl:
-                        return int(cl)
-            except Exception:
-                pass
-
-    return 0
+    return info.get('filesize', 0) or info.get('filesize_approx', 0) or 0
 
 def normalize_media_url(url):
     """Normalize and clean various site URLs (TikTok, Twitter/X, Instagram, Facebook, Reddit, Pinterest, YouTube Music)."""
@@ -1174,8 +1183,9 @@ def get_global_opts():
 # ==========================================
 def get_video_opts(q_var, sub_var, fmt_var, target_dir,
                    for_analysis=False, items_list=None):
-    fmt        = VIDEO_QUALITY_MAP.get(q_var.get(), "bestvideo+bestaudio/best")
-    fmt_choice = fmt_var.get()
+    q_name     = q_var.get() if q_var else "Best Available"
+    fmt        = build_video_format_selector(q_name)
+    fmt_choice = fmt_var.get() if fmt_var else "Default"
 
     opts = {
         'format':          fmt,
