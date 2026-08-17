@@ -68,7 +68,7 @@ if platform.system() != "Windows":
         if _extra not in os.environ.get("PATH", ""):
             os.environ["PATH"] = _extra + ":" + os.environ.get("PATH", "")
 
-APP_VERSION  = "2.0"
+APP_VERSION  = "2.1"
 APP_AUTHOR   = "Hedra Aleshaa"
 FFMPEG_DIR   = get_ffmpeg_path()
 BASE_DIR     = os.path.join(os.path.expanduser("~"), "Downloads", "YT Downloader")
@@ -686,8 +686,7 @@ def normalize_media_url(url):
 
     # ── 4. Facebook ────────────────────────────────────────────
     u = re.sub(r'https?://m\.facebook\.com', 'https://www.facebook.com', u, flags=re.IGNORECASE)
-    u = re.sub(r'(https?://(?:www\.)?facebook\.com)/share/r/([^/?#&]+)/?', r'\1/reel/\2', u, flags=re.IGNORECASE)
-    u = re.sub(r'(https?://(?:www\.)?facebook\.com)/share/v/([^/?#&]+)/?', r'\1/watch/?v=\2', u, flags=re.IGNORECASE)
+    u = re.sub(r'https?://(?:web|touch|mbasic)\.facebook\.com', 'https://www.facebook.com', u, flags=re.IGNORECASE)
 
     # ── 5. YouTube & YouTube Music ─────────────────────────────
     u = re.sub(r'https?://music\.youtube\.com/watch\?v=([^&#]+)', r'https://www.youtube.com/watch?v=\1', u, flags=re.IGNORECASE)
@@ -710,7 +709,7 @@ def detect_url_type(url):
     u = normalize_media_url(url).lower()
     if "list=" in u:
         return "playlist"
-    if any(x in u for x in ["youtu.be/", "watch?v=", "youtube.com/shorts/", "tiktok.com/", "twitter.com/", "x.com/", "fb.watch/", "facebook.com/reel/", "facebook.com/watch", "vimeo.com/", "reddit.com/", "pin.it/"]):
+    if any(x in u for x in ["youtu.be/", "watch?v=", "youtube.com/shorts/", "tiktok.com/", "twitter.com/", "x.com/", "fb.watch/", "facebook.com/reel/", "facebook.com/watch", "facebook.com/share/", "facebook.com/story.php", "facebook.com/video.php", "vimeo.com/", "reddit.com/", "pin.it/"]):
         return "video"
     if any(x in u for x in ["instagram.com/p/", "instagram.com/reel/", "instagram.com/reels/", "instagram.com/tv/", "instagram.com/stories/"]):
         return "video"
