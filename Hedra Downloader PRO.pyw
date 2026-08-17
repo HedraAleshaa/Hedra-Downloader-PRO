@@ -644,27 +644,39 @@ def format_seconds_to_time(seconds):
 def get_audio_bitrate(q_var):
     return AUDIO_BITRATE_MAP.get(q_var.get(), 256)
 
-def extract_size_from_info(info, is_audio=False, audio_bitrate=None):
+QUALITY_HEIGHT_MAP = {
+    "Max 8K (4320p)": 4320,
+    "Max 4K (2160p)": 2160,
+    "Max 1440p":      1440,
+    "Max 1080p":      1080,
+    "Max 720p":       720,
+    "Max 480p":       480,
+    "Max 360p":       360,
+}
+
+def extract_size_from_info(info, is_audio=False, audio_bitrate=None, target_quality=None):
     if not info:
         return 0
     if 'entries' in info:
         total = 0
         for entry in info['entries']:
             if entry:
-                total += extract_size_from_info(entry, is_audio, audio_bitrate)
+                total += extract_size_from_info(entry, is_audio, audio_bitrate, target_quality)
         return total
 
     duration = info.get('duration')
+    max_h = QUALITY_HEIGHT_MAP.get(target_quality, 99999) if target_quality else 99999
 
     # 1. Direct filesize if reported
-    if 'requested_formats' in info:
+    if 'requested_formats' in info and (target_quality is None or target_quality == "Best Available"):
         sz = sum(f.get('filesize', 0) or f.get('filesize_approx', 0) or 0
                  for f in info['requested_formats'])
         if sz > 0:
             return sz
-    sz = info.get('filesize', 0) or info.get('filesize_approx', 0) or 0
-    if sz > 0:
-        return sz
+    if (target_quality is None or target_quality == "Best Available"):
+        sz = info.get('filesize', 0) or info.get('filesize_approx', 0) or 0
+        if sz > 0:
+            return sz
 
     # 2. Estimate from stream bitrates (vbr, abr, tbr) and duration (Facebook, Instagram, TikTok)
     formats = info.get('formats', [])
@@ -675,10 +687,15 @@ def extract_size_from_info(info, is_audio=False, audio_bitrate=None):
         for f in formats:
             v_ok = f.get('vcodec') not in ('none', None)
             a_ok = f.get('acodec') not in ('none', None)
-            if v_ok and a_ok:
+            h = f.get('height') or 0
+            w = f.get('width') or 0
+            dim = min(w, h) if (w and h) else h
+            within_res = (dim <= max_h or h <= max_h) if (v_ok and max_h < 99999) else True
+
+            if v_ok and a_ok and within_res:
                 if not best_combo or (f.get('tbr') or 0) > (best_combo.get('tbr') or 0):
                     best_combo = f
-            elif v_ok:
+            elif v_ok and within_res:
                 if not best_v or (f.get('vbr') or f.get('tbr') or 0) > (best_v.get('vbr') or best_v.get('tbr') or 0):
                     best_v = f
             elif a_ok:
@@ -1819,7 +1836,7 @@ def run_download_thread(ydl_opts, links, folder_name,
 #  STANDARD ANALYZER
 # ==========================================
 def execute_standard_analysis(opts, links, info_box,
-                               is_audio=False, audio_bitrate=None,
+                               is_audio=False, audio_bitrate=None, target_quality=None,
                                tab=None, thumb_label=None, stale_banner=None):
     if not links:
         update_info_box(info_box, "⚠  Please paste link(s) first.", COL_WARN)
@@ -1851,7 +1868,7 @@ def execute_standard_analysis(opts, links, info_box,
                         raise ValueError("PROCESS_CANCELLED")
                     try:
                         info       = ydl.extract_info(link, download=False)
-                        size_bytes = extract_size_from_info(info, is_audio, audio_bitrate)
+                        size_bytes = extract_size_from_info(info, is_audio, audio_bitrate, target_quality)
                         total_bytes += size_bytes
                         successful  += 1
                         best_title, best_thumb = extract_better_metadata(info, f'Link {i+1}')
@@ -1912,7 +1929,7 @@ def execute_standard_analysis(opts, links, info_box,
 # ==========================================
 def analyze_playlist(opts, link, scroll_frame, checkbox_state_list,
                      dynamic_label, stale_banner,
-                     is_audio=False, audio_bitrate=None, tab=None,
+                     is_audio=False, audio_bitrate=None, target_quality=None, tab=None,
                      thumb_label=None):
     cleaned_link = normalize_media_url(link)
     if not cleaned_link:
@@ -1964,7 +1981,7 @@ def analyze_playlist(opts, link, scroll_frame, checkbox_state_list,
                             show_thumbnail(thumb_url, thumb_label)
                         first_thumb_shown = True
                     title, _ = extract_better_metadata(entry, f"Video {i+1}")
-                    size_bytes = extract_size_from_info(entry, is_audio, audio_bitrate)
+                    size_bytes = extract_size_from_info(entry, is_audio, audio_bitrate, target_quality)
                     valid_count += 1
                     idx          = i + 1
                     # Live counter update in status bar while entries load
@@ -2743,7 +2760,7 @@ def act_svid_check():
         set_status("⚠  Paste a link first.", COL_WARN, "Single Video"); return
     execute_standard_analysis(
         get_video_opts(vid_q_var, vid_s_var, vid_fmt_var, vid_path_var.get(), True),
-        [link], vid_info_box, is_audio=False, tab="Single Video",
+        [link], vid_info_box, is_audio=False, target_quality=vid_q_var.get(), tab="Single Video",
         thumb_label=vid_thumb_label, stale_banner=vid_stale_banner)
 
 def act_svid_dl(start_paused=False):
@@ -2782,7 +2799,7 @@ def act_bvid_check():
     links = [l for l in bvid_text.get("1.0", "end").splitlines() if l.strip()]
     execute_standard_analysis(
         get_video_opts(bvid_q_var, bvid_s_var, bvid_fmt_var, bvid_path_var.get(), True),
-        links, bvid_info_box, is_audio=False, tab="Batch Video",
+        links, bvid_info_box, is_audio=False, target_quality=bvid_q_var.get(), tab="Batch Video",
         thumb_label=bvid_thumb_label, stale_banner=bvid_stale_banner)
 
 def act_bvid_dl(start_paused=False):
@@ -2819,7 +2836,7 @@ def act_pvid_check():
     analyze_playlist(
         get_video_opts(pvid_q_var, pvid_s_var, pvid_fmt_var, pvid_path_var.get(), True),
         pvid_entry.get().strip(), pvid_scroll, pvid_checkboxes,
-        pvid_dynamic_lbl, pvid_stale_banner, is_audio=False, tab="Playlist Video",
+        pvid_dynamic_lbl, pvid_stale_banner, is_audio=False, target_quality=pvid_q_var.get(), tab="Playlist Video",
         thumb_label=pvid_thumb_label)
 
 def act_pvid_dl(start_paused=False):
