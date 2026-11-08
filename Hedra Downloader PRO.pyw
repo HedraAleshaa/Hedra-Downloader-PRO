@@ -14,6 +14,8 @@ import hashlib
 import tkinter as tk
 from tkinter import messagebox
 import webbrowser
+import uuid
+import concurrent.futures
 
 # Optional PIL for thumbnail preview
 try:
@@ -30,6 +32,8 @@ except ImportError:
     WINDND_AVAILABLE = False
 
 def check_deps():
+    if getattr(sys, 'frozen', False):
+        return
     def _install_background():
         to_install = []
         try:
@@ -39,13 +43,33 @@ def check_deps():
         try:
             import windnd
         except ImportError:
-            to_install.append("windnd")
+            if platform.system() == "Windows":
+                to_install.append("windnd")
         if to_install:
             subprocess.run([sys.executable, "-m", "pip", "install"] + to_install,
                            capture_output=True,
                            creationflags=0x08000000 if os.name == 'nt' else 0)
     threading.Thread(target=_install_background, daemon=True).start()
 check_deps()
+
+def _clean_thumb_cache():
+    """Background cleanup to cap on-disk thumbnail directory at 100MB."""
+    try:
+        if not os.path.isdir(THUMBS_DIR): return
+        files = [os.path.join(THUMBS_DIR, f) for f in os.listdir(THUMBS_DIR) if os.path.isfile(os.path.join(THUMBS_DIR, f))]
+        total_size = sum(os.path.getsize(f) for f in files)
+        max_bytes = 100 * 1024 * 1024
+        if total_size > max_bytes:
+            files.sort(key=os.path.getmtime)
+            for f in files:
+                try:
+                    total_size -= os.path.getsize(f)
+                    os.remove(f)
+                except Exception: pass
+                if total_size <= max_bytes * 0.7: break
+    except Exception:
+        pass
+threading.Thread(target=_clean_thumb_cache, daemon=True).start()
 
 # ==========================================
 #  SYSTEM SETUP & BUNDLING
@@ -69,7 +93,7 @@ if platform.system() != "Windows":
         if _extra not in os.environ.get("PATH", ""):
             os.environ["PATH"] = _extra + ":" + os.environ.get("PATH", "")
 
-APP_VERSION  = "2.1"
+APP_VERSION  = "2.2"
 APP_AUTHOR   = "Hedra Aleshaa"
 FFMPEG_DIR   = get_ffmpeg_path()
 BASE_DIR     = os.path.join(os.path.expanduser("~"), "Downloads", "YT Downloader")
@@ -585,7 +609,7 @@ def show_in_explorer(path):
     try:
         system = platform.system()
         if system == "Windows":
-            subprocess.run(f'explorer /select,"{os.path.normpath(path)}"', shell=True)
+            subprocess.run(['explorer.exe', f'/select,{os.path.normpath(path)}'], shell=False)
         elif system == "Darwin":
             subprocess.run(["open", "-R", path])
         else:
@@ -619,22 +643,21 @@ def send_notification(title, message):
         pass
     # 2. Toast
     try:
-        if 'global_notify_toast_var' in globals() and global_notify_toast_var.get():
+        if 'global_notify_toast_var' in globals() and global_notify_toast_var.get() and platform.system() == "Windows":
             def _toast():
                 try:
-                    clean_t = str(title).replace("'", "''").replace('"', '')
-                    clean_m = str(message).replace("'", "''").replace('"', '')
-                    ps_cmd = f"""
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
-$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
-$textNodes = $template.GetElementsByTagName('text')
-$textNodes.Item(0).AppendChild($template.CreateTextNode('{clean_t}')) > $null
-$textNodes.Item(1).AppendChild($template.CreateTextNode('{clean_m}')) > $null
-$toast = [Windows.UI.Notifications.ToastNotification]::new($template)
-$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Hedra Downloader')
-$notifier.Show($toast)
-"""
-                    subprocess.run(['powershell', '-WindowStyle', 'Hidden', '-Command', ps_cmd], capture_output=True, creationflags=0x08000000 if os.name == 'nt' else 0)
+                    ps_cmd = (
+                        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; "
+                        "$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
+                        "$textNodes = $template.GetElementsByTagName('text'); "
+                        "$textNodes.Item(0).AppendChild($template.CreateTextNode($args[0])) > $null; "
+                        "$textNodes.Item(1).AppendChild($template.CreateTextNode($args[1])) > $null; "
+                        "$toast = [Windows.UI.Notifications.ToastNotification]::new($template); "
+                        "$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Hedra Downloader'); "
+                        "$notifier.Show($toast)"
+                    )
+                    cmd = ['powershell', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps_cmd, str(title), str(message)]
+                    subprocess.run(cmd, capture_output=True, creationflags=0x08000000 if os.name == 'nt' else 0)
                 except Exception:
                     pass
             threading.Thread(target=_toast, daemon=True).start()
@@ -778,7 +801,7 @@ def normalize_media_url(url):
     u = re.sub(r'https?://(?:www\.)?redd\.it/([^/?#&]+)/?', r'https://www.reddit.com/comments/\1', u, flags=re.IGNORECASE)
 
     # ── 7. Universal Query Tracking Cleaner ────────────────────
-    track_pattern = r'[?&](utm_[a-zA-Z_]+|igsh|ig_mid|ig_rid|mibextid|rdid|si|fbclid|gclid|feature|ref|ref_src|source|is_from_webapp|sender_device|_r|_t|share_item_id|t|s)=[^&#]*'
+    track_pattern = r'[?&](utm_[a-zA-Z_]+|igsh|ig_mid|ig_rid|mibextid|rdid|si|fbclid|gclid|feature|ref|ref_src|source|is_from_webapp|sender_device|_r|_t|share_item_id|s)=[^&#]*'
     while re.search(track_pattern, u, flags=re.IGNORECASE):
         u = re.sub(track_pattern, '', u, flags=re.IGNORECASE)
         u = re.sub(r'\?&+', '?', u)
@@ -861,7 +884,14 @@ def attach_auto_check(vars_list, entry_widget, check_action):
     for v in vars_list:
         v.trace_add("write", _on_change)
 
+_last_analyzed_meta = {}
+
 def get_info_details(info_box, fallback_hint):
+    if info_box in _last_analyzed_meta:
+        meta = _last_analyzed_meta[info_box]
+        title = meta.get("title") or fallback_hint
+        size = meta.get("size") or "Unknown"
+        return title, size
     text = info_box.get("1.0", "end").strip()
     title = fallback_hint
     size = "Unknown"
@@ -917,7 +947,6 @@ def trigger_stop():
         except: pass
     current = tabview.get()
     app.after(0, lambda: set_status("⏹  Aborting… cleaning up.", COL_ERR, current))
-    app.after(100, global_queue.pump)
 
 def update_info_box(widget, text, color=COL_ACCENT):
     widget.configure(state="normal")
@@ -1171,18 +1200,44 @@ def get_global_opts():
             opts['proxy'] = proxy
     except Exception:
         pass
-    opts['extractor_args'] = {
-        'youtube': {
-            'player_client': ['android_vr', 'android', 'web', 'mweb']
-        }
-    }
     return opts
+
+def parse_timestamp(text):
+    """Convert hh:mm:ss, mm:ss, raw seconds, or '1m 30s' string to float seconds.
+    Returns None if text is empty or invalid."""
+    if text is None:
+        return None
+    text = str(text).strip().lower()
+    if not text:
+        return None
+    if text in ("0", "00:00", "00:00:00", "0.0"):
+        return 0.0
+    
+    if re.search(r'[hms]', text):
+        total = 0.0
+        h = re.search(r'(\d+)\s*h', text)
+        m = re.search(r'(\d+)\s*m', text)
+        s = re.search(r'(\d+(?:\.\d+)?)\s*s', text)
+        if h: total += int(h.group(1)) * 3600
+        if m: total += int(m.group(1)) * 60
+        if s: total += float(s.group(1))
+        return total
+
+    parts = text.split(":")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        return float(text)
+    except (ValueError, IndexError):
+        return None
 
 # ==========================================
 #  OPTION BUILDERS
 # ==========================================
 def get_video_opts(q_var, sub_var, fmt_var, target_dir,
-                   for_analysis=False, items_list=None):
+                   for_analysis=False, items_list=None, start_time=None, end_time=None):
     q_name     = q_var.get() if q_var else "Best Available"
     fmt        = build_video_format_selector(q_name)
     fmt_choice = fmt_var.get() if fmt_var else "Default"
@@ -1208,6 +1263,13 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
 
     if not for_analysis:
         opts['progress_hooks'] = [progress_hook]
+        
+        s_sec = parse_timestamp(start_time)
+        e_sec = parse_timestamp(end_time)
+        if s_sec is not None or e_sec is not None:
+            opts['download_ranges'] = yt_dlp.utils.download_range_func(
+                None, [(s_sec or 0.0, e_sec if e_sec is not None else float('inf'))])
+            opts['force_keyframes_at_cuts'] = True
         
         postprocessors = []
         
@@ -1257,7 +1319,7 @@ def get_video_opts(q_var, sub_var, fmt_var, target_dir,
     return opts
 
 def get_audio_opts(q_var, fmt_var, target_dir,
-                   for_analysis=False, items_list=None):
+                   for_analysis=False, items_list=None, start_time=None, end_time=None):
     aq_label   = q_var.get()
     aq         = AUDIO_QUALITY_MAP.get(aq_label, "0")
     fmt_choice = fmt_var.get()
@@ -1283,12 +1345,17 @@ def get_audio_opts(q_var, fmt_var, target_dir,
 
     if not for_analysis:
         opts['progress_hooks'] = [progress_hook]
-        opts['writethumbnail'] = True
+        
+        s_sec = parse_timestamp(start_time)
+        e_sec = parse_timestamp(end_time)
+        if s_sec is not None or e_sec is not None:
+            opts['download_ranges'] = yt_dlp.utils.download_range_func(
+                None, [(s_sec or 0.0, e_sec if e_sec is not None else float('inf'))])
+            opts['force_keyframes_at_cuts'] = True
         
         postprocessors = [
             {'key': 'FFmpegExtractAudio',
              'preferredcodec': fmt_choice, 'preferredquality': aq},
-            {'key': 'EmbedThumbnail', 'already_have_thumbnail': False},
         ]
         
         if global_sponsorblock_var.get():
@@ -1309,7 +1376,9 @@ speed_canvas_ref = None
 lbl_q_speed_ref = None
 lbl_q_peak_ref = None
 lbl_q_active_ref = None
+lbl_q_pending_ref = None
 lbl_q_total_ref = None
+_queue_ui_widgets = {}
 
 def _draw_speed_graph():
     if speed_canvas_ref is None or not speed_canvas_ref.winfo_exists(): return
@@ -1349,36 +1418,43 @@ def update_queue_ui_periodic():
     if queue_box_ref is None or not queue_box_ref.winfo_exists(): return
     
     current_speed = 0.0
-    for job in global_queue.jobs:
-        if "ui_status_label" in job and job["ui_status_label"].winfo_exists():
-            c = COL_ACCENT if job['status'] == "Downloading" else COL_MUTED
-            if job['status'] == "Completed": c = COL_SUCCESS
-            if job['status'] in ["Error", "Cancelled"]: c = COL_ERR
-            if job['status'] == "Paused": c = COL_WARN
-            job["ui_status_label"].configure(text=f"{job['status']}  |  {job.get('progress_text', '')}", text_color=c)
+    jobs_snap = global_queue.get_jobs_snapshot()
+    for job in jobs_snap:
+        jid = job.get('id')
+        if jid in _queue_ui_widgets:
+            w = _queue_ui_widgets[jid]
+            lbl = w.get("status_lbl")
+            pb = w.get("pb")
+            if lbl and lbl.winfo_exists():
+                c = COL_ACCENT if job['status'] == "Downloading" else COL_MUTED
+                if job['status'] == "Completed": c = COL_SUCCESS
+                if job['status'] in ["Error", "Cancelled"]: c = COL_ERR
+                if job['status'] == "Paused": c = COL_WARN
+                lbl.configure(text=f"{job['status']}  |  {job.get('progress_text', '')}", text_color=c)
             
-            if "ui_progress_bar" in job and job["ui_progress_bar"].winfo_exists():
+            if pb and pb.winfo_exists():
                 pct = job.get('progress_pct', 0.0)
-                job["ui_progress_bar"].set(pct)
+                pb.set(pct)
                 if job['status'] == "Downloading":
-                    job["ui_progress_bar"].configure(progress_color=COL_ACCENT)
+                    pb.configure(progress_color=COL_ACCENT)
                 elif job['status'] == "Paused":
-                    job["ui_progress_bar"].configure(progress_color=COL_WARN)
+                    pb.configure(progress_color=COL_WARN)
                 elif job['status'] == "Completed":
-                    job["ui_progress_bar"].configure(progress_color=COL_SUCCESS)
+                    pb.configure(progress_color=COL_SUCCESS)
                 else:
-                    job["ui_progress_bar"].configure(progress_color=COL_ERR)
+                    pb.configure(progress_color=COL_ERR)
                     
         if job['status'] == "Downloading":
             current_speed += float(job.get('speed_bytes', 0.0))
             
     # Update global progress bar
-    active_jobs = [j for j in global_queue.jobs if j['status'] == 'Downloading']
+    active_jobs = [j for j in jobs_snap if j['status'] == 'Downloading']
+    pending_jobs = [j for j in jobs_snap if j['status'] == 'Pending']
     if active_jobs:
         avg_pct = sum(j.get('progress_pct', 0.0) for j in active_jobs) / len(active_jobs)
         progress_bar.set(avg_pct)
         pct_label.configure(text=f" {int(avg_pct*100)}% ")
-    elif not any(j['status'] in ['Pending', 'Paused'] for j in global_queue.jobs) and any(j['status'] == 'Completed' for j in global_queue.jobs):
+    elif not any(j['status'] in ['Pending', 'Paused'] for j in jobs_snap) and any(j['status'] == 'Completed' for j in jobs_snap):
         progress_bar.set(1.0)
         pct_label.configure(text=" 100% ")
 
@@ -1394,6 +1470,8 @@ def update_queue_ui_periodic():
         lbl_q_peak_ref.configure(text=f"▲ Peak: {format_size(_peak_session_speed)}/s")
     if lbl_q_active_ref and lbl_q_active_ref.winfo_exists():
         lbl_q_active_ref.configure(text=f"⬇ Active: {len(active_jobs)}")
+    if lbl_q_pending_ref and lbl_q_pending_ref.winfo_exists():
+        lbl_q_pending_ref.configure(text=f"⏳ Pending: {len(pending_jobs)}")
     if lbl_q_total_ref and lbl_q_total_ref.winfo_exists():
         lbl_q_total_ref.configure(text=f"📦 Session: {_session_dl_count} completed")
 
@@ -1406,7 +1484,9 @@ queue_filter_var = None
 def refresh_queue_tab():
     if queue_box_ref is None: return
     for w in queue_box_ref.winfo_children(): w.destroy()
-    if not global_queue.jobs:
+    _queue_ui_widgets.clear()
+    jobs_snap = global_queue.get_jobs_snapshot()
+    if not jobs_snap:
         ctk.CTkLabel(queue_box_ref, text="Queue is empty.", text_color=COL_MUTED).pack(pady=20)
         return
         
@@ -1414,7 +1494,7 @@ def refresh_queue_tab():
     s_filter = queue_filter_var.get() if queue_filter_var else "All"
     
     filtered_jobs = []
-    for j in global_queue.jobs:
+    for j in jobs_snap:
         if s_filter == "Active" and j.get("status") not in ["Pending", "Downloading"]:
             continue
         elif s_filter == "Paused" and j.get("status") != "Paused":
@@ -1450,17 +1530,18 @@ def refresh_queue_tab():
             info_parts.append(f"🔊 {job.get('volume_boost')}")
         if job.get('trim_silence'):
             info_parts.append("✂ Trimmed")
+        if job.get('segment'):
+            info_parts.append(f"✂ {job.get('segment')}")
         info_str = "  |  ".join(info_parts)
         ctk.CTkLabel(left, text=info_str, font=("Consolas", 10), text_color=COL_MUTED, anchor="w").pack(fill="x")
         
         status_lbl = ctk.CTkLabel(left, text=f"{job['status']}  |  {job.get('progress_text', '')}", font=("Segoe UI", 11), anchor="w")
         status_lbl.pack(fill="x")
-        job["ui_status_label"] = status_lbl
         
         pb = ctk.CTkProgressBar(left, height=6)
         pb.pack(fill="x", pady=(4,0))
         pb.set(job.get('progress_pct', 0.0))
-        job["ui_progress_bar"] = pb
+        _queue_ui_widgets[job['id']] = {"status_lbl": status_lbl, "pb": pb}
         
         right = ctk.CTkFrame(f, fg_color="transparent")
         right.pack(side="right", padx=10)
@@ -1473,23 +1554,53 @@ def refresh_queue_tab():
             ctk.CTkButton(right, text="Pause", width=60, height=28, command=cmd_p).pack(side="left", padx=2)
         elif job['status'] == "Paused":
             ctk.CTkButton(right, text="Resume", width=60, height=28, command=cmd_r).pack(side="left", padx=2)
+        elif job['status'] == "Completed":
+            fpath = job.get('fpath', '')
+            if fpath and os.path.exists(fpath):
+                ctk.CTkButton(right, text="▶ Play", width=55, height=28, font=("Segoe UI", 11, "bold"),
+                              fg_color="#0F766E", hover_color="#115E59", text_color="#FFFFFF",
+                              command=lambda fp=fpath: open_file_direct(fp)).pack(side="left", padx=2)
+                ctk.CTkButton(right, text="📁", width=32, height=28, font=("Segoe UI", 11),
+                              fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
+                              command=lambda fp=fpath: show_in_explorer(fp)).pack(side="left", padx=2)
+        elif job['status'] in ["Error", "Cancelled"]:
+            def make_retry(jid=job['id']):
+                def _retry():
+                    with global_queue._lock:
+                        j = next((x for x in global_queue.jobs if x["id"] == jid), None)
+                        if j:
+                            j["status"] = "Pending"
+                            j["progress_text"] = "Waiting in queue..."
+                            j["progress_pct"] = 0.0
+                    save_queue()
+                    app.after(0, refresh_queue_tab)
+                    global_queue.pump()
+                return _retry
+            ctk.CTkButton(right, text="🔄 Retry", width=65, height=28, font=("Segoe UI", 11),
+                          fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
+                          command=make_retry()).pack(side="left", padx=2)
             
         ctk.CTkButton(right, text="✖", width=28, height=28, fg_color=COL_ERR, hover_color="#450A0A", command=cmd_c).pack(side="left", padx=2)
 
 class JobQueue:
     def __init__(self):
+        self._lock = threading.RLock()
         self.jobs = []
         self.active_workers = 0
         self.cancel_events = {}
         self.worker_threads = {}
         self.queue_cancel = threading.Event()
         
-    def add(self, opts, links, folder_name, mode, hint, tab, size="Unknown", quality="—", file_type="—", start_paused=False, volume_boost="Normal (0 dB)", trim_silence=False):
+    def get_jobs_snapshot(self):
+        with self._lock:
+            return [dict(j) for j in self.jobs]
+
+    def add(self, opts, links, folder_name, mode, hint, tab, size="Unknown", quality="—", file_type="—", start_paused=False, volume_boost="Normal (0 dB)", trim_silence=False, segment=None):
         cancel_event.clear()
         self.queue_cancel.clear()
         cleaned_links = [normalize_media_url(l) for l in links if l and str(l).strip()]
         job = {
-            "id": str(time.time()),
+            "id": uuid.uuid4().hex,
             "opts": opts,
             "links": cleaned_links,
             "folder_name": folder_name,
@@ -1503,54 +1614,66 @@ class JobQueue:
             "progress_text": "Paused" if start_paused else "Waiting in queue...",
             "volume_boost": volume_boost,
             "trim_silence": trim_silence,
+            "segment": segment,
+            "last_downloading_size": "Unknown"
         }
-        self.jobs.append(job)
+        with self._lock:
+            self.jobs.append(job)
+        save_queue()
         app.after(0, refresh_queue_tab)
         app.after(0, lambda: set_status("✔ Added to Queue.", COL_SUCCESS, tab))
         if not start_paused:
             self.pump()
         
     def pause(self, jid):
-        j = next((x for x in self.jobs if x["id"]==jid), None)
-        if not j: return
-        if j["status"] == "Pending":
-            j["status"] = "Paused"
-            j["progress_text"] = "Paused."
-        elif j["status"] == "Downloading":
-            j["status"] = "Paused"
-            if jid in self.cancel_events:
-                self.cancel_events[jid].set()
+        with self._lock:
+            j = next((x for x in self.jobs if x["id"]==jid), None)
+            if not j: return
+            if j["status"] == "Pending":
+                j["status"] = "Paused"
+                j["progress_text"] = "Paused."
+            elif j["status"] == "Downloading":
+                j["status"] = "Paused"
+                if jid in self.cancel_events:
+                    self.cancel_events[jid].set()
+        save_queue()
         app.after(0, refresh_queue_tab)
         
     def resume(self, jid):
-        j = next((x for x in self.jobs if x["id"]==jid), None)
-        if not j: return
-        if j["status"] == "Paused":
-            j["status"] = "Pending"
-            j["progress_text"] = "Waiting in queue..."
-        cancel_event.clear()
-        self.queue_cancel.clear()
-        if jid in self.cancel_events:
-            self.cancel_events[jid].clear()
+        with self._lock:
+            j = next((x for x in self.jobs if x["id"]==jid), None)
+            if not j: return
+            if j["status"] == "Paused":
+                j["status"] = "Pending"
+                j["progress_text"] = "Waiting in queue..."
+            cancel_event.clear()
+            self.queue_cancel.clear()
+            if jid in self.cancel_events:
+                self.cancel_events[jid].clear()
+        save_queue()
         app.after(0, refresh_queue_tab)
         self.pump()
         
     def cancel(self, jid):
-        j = next((x for x in self.jobs if x["id"]==jid), None)
-        if not j: return
-        if j["status"] == "Downloading":
-            j["status"] = "Cancelled"
-            j["progress_text"] = "Stopped."
-            j["progress_pct"] = 0.0
-            if jid in self.cancel_events:
-                self.cancel_events[jid].set()
-        else:
-            self.jobs.remove(j)
+        with self._lock:
+            j = next((x for x in self.jobs if x["id"]==jid), None)
+            if not j: return
+            if j["status"] == "Downloading":
+                j["status"] = "Cancelled"
+                j["progress_text"] = "Stopped."
+                j["progress_pct"] = 0.0
+                if jid in self.cancel_events:
+                    self.cancel_events[jid].set()
+            else:
+                self.jobs.remove(j)
+        save_queue()
         app.after(0, refresh_queue_tab)
         app.after(50, self.pump)
         
     def clear_finished(self):
-        self.jobs = [j for j in self.jobs if j["status"] not in ["Completed", "Error", "Cancelled"]]
+        with self._lock:
+            self.jobs = [j for j in self.jobs if j["status"] not in ["Completed", "Error", "Cancelled"]]
+        save_queue()
         app.after(0, refresh_queue_tab)
         
     def get_max_concurrent(self):
@@ -1558,28 +1681,28 @@ class JobQueue:
         except: return 1
 
     def pump(self):
-        # Always purge dead threads to prevent worker desynchronization
-        self.worker_threads = {jid: t for jid, t in self.worker_threads.items() if t.is_alive()}
-        self.active_workers = len(self.worker_threads)
+        with self._lock:
+            # Always purge dead threads to prevent worker desynchronization
+            self.worker_threads = {jid: t for jid, t in self.worker_threads.items() if t.is_alive()}
+            self.active_workers = len(self.worker_threads)
 
-        max_c = self.get_max_concurrent()
-        while self.active_workers < max_c:
-            nxt = next((x for x in self.jobs if x["status"] == "Pending"), None)
-            if not nxt: break
-            
-            jid = nxt["id"]
-            nxt["status"] = "Downloading"
-            nxt["progress_text"] = "Starting..."
-            self.active_workers += 1
-            self.cancel_events[jid] = threading.Event()
-            app.after(0, refresh_queue_tab)
-            t = threading.Thread(target=self._worker, args=(nxt,), daemon=True)
-            self.worker_threads[jid] = t
-            t.start()
+            max_c = self.get_max_concurrent()
+            while self.active_workers < max_c:
+                nxt = next((x for x in self.jobs if x["status"] == "Pending"), None)
+                if not nxt: break
+                
+                jid = nxt["id"]
+                nxt["status"] = "Downloading"
+                nxt["progress_text"] = "Starting..."
+                self.active_workers += 1
+                self.cancel_events[jid] = threading.Event()
+                app.after(0, refresh_queue_tab)
+                t = threading.Thread(target=self._worker, args=(nxt,), daemon=True)
+                self.worker_threads[jid] = t
+                t.start()
             
     def _worker(self, job):
-        global _last_downloading_size
-        _last_downloading_size = "Unknown"
+        job["last_downloading_size"] = "Unknown"
         jid = job["id"]
         job_cancel = self.cancel_events.get(jid)
         
@@ -1597,25 +1720,39 @@ class JobQueue:
             is_sub = any(filename.lower().endswith(ext) for ext in ['.srt', '.vtt', '.ass', '.lrc'])
             is_thumb = any(filename.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp'])
 
+            playlist_idx   = d.get('info_dict', {}).get('playlist_index') or d.get('playlist_index')
+            playlist_count = d.get('info_dict', {}).get('playlist_count') or d.get('playlist_count')
+            prefix = f"[{playlist_idx}/{playlist_count}] " if playlist_idx and playlist_count else ""
+
             if d['status'] == 'downloading':
                 percent_str = strip_ansi(d.get('_percent_str', '0%')).strip()
                 speed       = strip_ansi(d.get('_speed_str', 'N/A')).strip()
                 eta         = strip_ansi(d.get('_eta_str', 'N/A')).strip()
+                total       = strip_ansi(d.get('_total_bytes_str') or
+                                         d.get('_total_bytes_estimate_str') or 'Unknown').strip()
+                job['last_downloading_size'] = total
                 job['speed_bytes'] = d.get('speed') or 0
                 if not is_sub and not is_thumb:
                     try:
-                        job['progress_pct'] = float(percent_str.replace('%', '')) / 100.0
-                    except:
+                        item_pct = float(percent_str.replace('%', '')) / 100.0
+                        if playlist_idx and playlist_count and int(playlist_count) > 1:
+                            job['progress_pct'] = min(1.0, max(0.0, ((int(playlist_idx) - 1) + item_pct) / int(playlist_count)))
+                        else:
+                            job['progress_pct'] = item_pct
+                    except Exception:
                         pass
-                    job['progress_text'] = f"{percent_str}  |  {speed}  |  ETA: {eta}"
+                    job['progress_text'] = f"{prefix}{percent_str}  |  {speed}  |  ETA: {eta}"
                 else:
-                    job['progress_text'] = f"Fetching subtitles/thumbnails... ({speed})"
+                    job['progress_text'] = f"{prefix}Fetching subtitles/thumbnails... ({speed})"
                 
             elif d['status'] == 'finished':
                 if not is_sub and not is_thumb:
-                    job['progress_pct'] = 1.0
+                    if playlist_idx and playlist_count and int(playlist_count) > 1:
+                        job['progress_pct'] = min(1.0, float(int(playlist_idx)) / int(playlist_count))
+                    else:
+                        job['progress_pct'] = 1.0
                     job['speed_bytes'] = 0
-                    job['progress_text'] = "Muxing & finalizing..."
+                    job['progress_text'] = f"{prefix}Muxing & finalizing..." if prefix else "Muxing & finalizing..."
 
         opts_copy = dict(job["opts"])
         hooks = opts_copy.get("progress_hooks", [])
@@ -1641,27 +1778,76 @@ class JobQueue:
                         pass
 
                     info = None
-                    try:
-                        info = ydl.extract_info(link, download=True)
-                    except Exception as dl_err:
-                        found_file = ""
-                        if expected_fpath and os.path.isfile(expected_fpath) and os.path.getsize(expected_fpath) > 1024:
-                            found_file = expected_fpath
-                        else:
-                            tgt_dir = job.get("target_dir") or (AUD_DIR if "Audio" in job.get("mode", "") else VID_DIR)
-                            if os.path.isdir(tgt_dir):
-                                candidates = [os.path.join(tgt_dir, f) for f in os.listdir(tgt_dir)
-                                              if not f.endswith(('.part', '.ytdl', '.vtt', '.srt', '.aria2', '.temp'))]
-                                if candidates:
-                                    latest = max(candidates, key=os.path.getmtime)
-                                    if time.time() - os.path.getmtime(latest) < 180 and os.path.getsize(latest) > 1024:
-                                        found_file = latest
-                        
-                        if found_file:
-                            fpath = found_file
-                            info = pre_info or {"title": t_hint, "_filename": fpath}
-                        else:
-                            raise dl_err
+                    MEDIA_EXTS = ('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv', '.ts', '.m4v',
+                                  '.mp3', '.m4a', '.wav', '.opus', '.flac', '.aac', '.ogg', '.wma')
+                    
+                    max_retries = 3
+                    try: max_retries = int(global_retries_var.get())
+                    except Exception: pass
+                    attempt = 0
+                    
+                    while True:
+                        try:
+                            info = ydl.extract_info(link, download=True)
+                            break
+                        except Exception as dl_err:
+                            if (job_cancel and job_cancel.is_set()) or cancel_event.is_set() or self.queue_cancel.is_set():
+                                raise
+                            found_file = ""
+                            if expected_fpath and os.path.isfile(expected_fpath) and expected_fpath.lower().endswith(MEDIA_EXTS) and os.path.getsize(expected_fpath) > 1024:
+                                found_file = expected_fpath
+                            else:
+                                tgt_dir = job.get("target_dir") or (AUD_DIR if "Audio" in job.get("mode", "") else VID_DIR)
+                                if os.path.isdir(tgt_dir):
+                                    candidates = [os.path.join(tgt_dir, f) for f in os.listdir(tgt_dir)
+                                                  if f.lower().endswith(MEDIA_EXTS)]
+                                    if candidates:
+                                        latest = max(candidates, key=os.path.getmtime)
+                                        if time.time() - os.path.getmtime(latest) < 180 and os.path.getsize(latest) > 1024:
+                                            found_file = latest
+                            
+                            if found_file:
+                                fpath = found_file
+                                info = pre_info or {"title": t_hint, "_filename": fpath}
+                                break
+                            
+                            err_l = str(dl_err).lower()
+                            if any(k in err_l for k in ["login required", "checkpoint", "rate-limit", "rate limited", "unauthorized", "http error 401", "401", "403", "copyright"]):
+                                try:
+                                    tgt_dir = job.get("target_dir") or (AUD_DIR if "Audio" in job.get("mode", "") else VID_DIR)
+                                    if os.path.isdir(tgt_dir):
+                                        for f in os.listdir(tgt_dir):
+                                            if f.lower().endswith(('.webp', '.jpg', '.jpeg', '.png')):
+                                                fp = os.path.join(tgt_dir, f)
+                                                if time.time() - os.path.getmtime(fp) < 180:
+                                                    try: os.remove(fp)
+                                                    except Exception: pass
+                                except Exception:
+                                    pass
+                                raise dl_err
+                                
+                            attempt += 1
+                            if attempt > max_retries:
+                                try:
+                                    tgt_dir = job.get("target_dir") or (AUD_DIR if "Audio" in job.get("mode", "") else VID_DIR)
+                                    if os.path.isdir(tgt_dir):
+                                        for f in os.listdir(tgt_dir):
+                                            if f.lower().endswith(('.webp', '.jpg', '.jpeg', '.png')):
+                                                fp = os.path.join(tgt_dir, f)
+                                                if time.time() - os.path.getmtime(fp) < 180:
+                                                    try: os.remove(fp)
+                                                    except Exception: pass
+                                except Exception:
+                                    pass
+                                raise dl_err
+                                
+                            backoff = min(2 ** attempt, 16)
+                            job["progress_text"] = f"Network drop. Retry {attempt}/{max_retries} in {backoff}s..."
+                            app.after(0, refresh_queue_tab)
+                            for _ in range(backoff * 2):
+                                if (job_cancel and job_cancel.is_set()) or cancel_event.is_set() or self.queue_cancel.is_set():
+                                    raise ValueError("PROCESS_CANCELLED")
+                                time.sleep(0.5)
                             
                     if not info and pre_info:
                         info = pre_info
@@ -1672,7 +1858,7 @@ class JobQueue:
                     title, _ = extract_better_metadata(info, t_hint)
                     sz = extract_size_from_info(info, "Audio" in job["mode"])
                     if sz: sz_str = format_size(sz)
-                    elif _last_downloading_size != "Unknown": sz_str = _last_downloading_size
+                    elif job.get('last_downloading_size', 'Unknown') != 'Unknown': sz_str = job['last_downloading_size']
                     else: sz_str = job.get("size", "—")
                     
                     if job["hint"] == link or job["hint"] == "Link 1":
@@ -1685,11 +1871,11 @@ class JobQueue:
                     if not fpath:
                         try: fpath = ydl.prepare_filename(info)
                         except Exception: pass
-                    if not fpath or not os.path.isfile(fpath):
+                    if not fpath or not os.path.isfile(fpath) or not fpath.lower().endswith(MEDIA_EXTS):
                         tgt_dir = job.get("target_dir") or (AUD_DIR if "Audio" in job.get("mode", "") else VID_DIR)
                         if os.path.isdir(tgt_dir):
                             candidates = [os.path.join(tgt_dir, f) for f in os.listdir(tgt_dir)
-                                          if not f.endswith(('.part', '.ytdl', '.vtt', '.srt', '.aria2', '.temp'))]
+                                          if f.lower().endswith(MEDIA_EXTS)]
                             if candidates:
                                 latest = max(candidates, key=os.path.getmtime)
                                 if time.time() - os.path.getmtime(latest) < 180 and os.path.getsize(latest) > 1024:
@@ -1729,9 +1915,17 @@ class JobQueue:
                                 
                                 a_proc = subprocess.run(aud_cmd, capture_output=True, creationflags=creationflags)
                                 if a_proc.returncode == 0 and os.path.isfile(temp_aud) and os.path.getsize(temp_aud) > 0:
-                                    os.remove(fpath)
-                                    os.replace(temp_aud, fpath)
-                                    sz_str = format_size(os.path.getsize(fpath))
+                                    try:
+                                        os.replace(temp_aud, fpath)
+                                        sz_str = format_size(os.path.getsize(fpath))
+                                    except Exception:
+                                        if os.path.isfile(temp_aud):
+                                            try: os.remove(temp_aud)
+                                            except Exception: pass
+                                else:
+                                    if os.path.isfile(temp_aud):
+                                        try: os.remove(temp_aud)
+                                        except Exception: pass
                         except Exception:
                             pass
 
@@ -1742,7 +1936,7 @@ class JobQueue:
                             fdir, fname = os.path.split(fpath)
                             fbase, _ = os.path.splitext(fname)
                             for sub_f in os.listdir(fdir):
-                                if sub_f.startswith(fbase) and (sub_f.endswith('.srt') or sub_f.endswith('.vtt') or sub_f.endswith('.ass')):
+                                if sub_f.startswith(fbase + ".") and sub_f.lower().endswith(('.srt', '.vtt', '.ass', '.lrc')):
                                     try:
                                         os.remove(os.path.join(fdir, sub_f))
                                     except Exception:
@@ -1754,6 +1948,7 @@ class JobQueue:
                     if not best_thumb and isinstance(info, dict):
                         best_thumb = info.get("thumbnail") or ""
                     save_history_entry(title, link, job["mode"], sz_str, job.get("quality", "—"), job.get("file_type", "—"), file_path=fpath, thumbnail=best_thumb)
+                    job["fpath"] = fpath
             
             app.after(0, _increment_session_counter)
             app.after(0, lambda: set_status(f"✔ Completed: {job['hint']}", COL_SUCCESS, job["tab"]))
@@ -1762,6 +1957,8 @@ class JobQueue:
             if history_box_ref: app.after(200, refresh_history_tab)
             job["status"] = "Completed"
             job["progress_text"] = "Done"
+            if "fpath" not in job and fpath:
+                job["fpath"] = fpath
             send_notification("Download Complete! ✔", f"{job['hint']}")
             
         except Exception as e:
@@ -1783,15 +1980,20 @@ class JobQueue:
                 app.after(0, lambda: set_status("⚠ Failed: Cookies required (Settings → load cookies.txt or Firefox)", COL_WARN, job["tab"]))
             else:
                 job["status"] = "Error"
-                job["progress_text"] = "Failed."
+                clean_err = err_str.replace("ERROR:", "").strip()
+                if len(clean_err) > 60:
+                    clean_err = clean_err[:57] + "..."
+                job["progress_text"] = clean_err or "Failed."
                 job["progress_pct"] = 0.0
-                app.after(0, lambda: set_status("✘ Failed.", COL_ERR, job["tab"]))
+                app.after(0, lambda m=clean_err: set_status(f"✘ Failed: {m}" if m else "✘ Failed.", COL_ERR, job["tab"]))
         finally:
-            self.active_workers -= 1
-            if jid in self.cancel_events:
-                del self.cancel_events[jid]
-            if jid in self.worker_threads:
-                del self.worker_threads[jid]
+            with self._lock:
+                self.active_workers -= 1
+                if jid in self.cancel_events:
+                    del self.cancel_events[jid]
+                if jid in self.worker_threads:
+                    del self.worker_threads[jid]
+            save_queue()
             app.after(0, progress_bar.stop)
             app.after(0, lambda: progress_bar.configure(mode="determinate"))
             app.after(0, refresh_queue_tab)
@@ -1801,8 +2003,8 @@ global_queue = JobQueue()
 
 def save_queue():
     jobs_data = []
-    for j in global_queue.jobs:
-        if j['status'] in ["Completed", "Error", "Cancelled"]: continue
+    for j in global_queue.get_jobs_snapshot():
+        if j.get('status') in ["Completed", "Error", "Cancelled"]: continue
         opts_copy = dict(j['opts'])
         opts_copy.pop('progress_hooks', None)
         opts_copy.pop('download_ranges', None)
@@ -1817,12 +2019,16 @@ def save_queue():
             "size": j["size"],
             "quality": j["quality"],
             "file_type": j["file_type"],
+            "volume_boost": j.get("volume_boost", "Normal (0 dB)"),
+            "trim_silence": j.get("trim_silence", False),
+            "segment": j.get("segment"),
+            "fpath": j.get("fpath", ""),
             "status": "Paused"
         })
     try:
         with open(QUEUE_FILE, "w", encoding="utf-8") as f:
             json.dump(jobs_data, f, indent=2)
-    except: pass
+    except Exception: pass
 
 def load_queue():
     if not os.path.exists(QUEUE_FILE): return
@@ -1830,9 +2036,22 @@ def load_queue():
         with open(QUEUE_FILE, "r", encoding="utf-8") as f:
             jobs_data = json.load(f)
         for jd in jobs_data:
-            global_queue.add(jd["opts"], jd["links"], jd["folder_name"], jd["mode"], jd["hint"], jd["tab"], jd["size"], jd["quality"], jd["file_type"], start_paused=True)
-        os.remove(QUEUE_FILE)
-    except: pass
+            global_queue.add(
+                jd.get("opts", {}),
+                jd.get("links", []),
+                jd.get("folder_name", ""),
+                jd.get("mode", ""),
+                jd.get("hint", ""),
+                jd.get("tab", ""),
+                jd.get("size", "Unknown"),
+                jd.get("quality", "—"),
+                jd.get("file_type", "—"),
+                start_paused=True,
+                volume_boost=jd.get("volume_boost", "Normal (0 dB)"),
+                trim_silence=jd.get("trim_silence", False),
+                segment=jd.get("segment")
+            )
+    except Exception: pass
 
 
 
@@ -1840,11 +2059,11 @@ def load_queue():
 #  DOWNLOAD RUNNER
 # ==========================================
 def run_download_thread(ydl_opts, links, folder_name,
-                        mode="Video", title_hint="", tab=None, size="Unknown", quality="—", file_type="—", start_paused=False, volume_boost="Normal (0 dB)", trim_silence=False):
+                        mode="Video", title_hint="", tab=None, size="Unknown", quality="—", file_type="—", start_paused=False, volume_boost="Normal (0 dB)", trim_silence=False, segment=None):
     if not links or not any(l.strip() for l in links):
         set_status("⚠  No links to download.", COL_WARN, tab)
         return
-    global_queue.add(ydl_opts, [l.strip() for l in links if l.strip()], folder_name, mode, title_hint, tab, size, quality, file_type, start_paused, volume_boost, trim_silence)
+    global_queue.add(ydl_opts, [l.strip() for l in links if l.strip()], folder_name, mode, title_hint, tab, size, quality, file_type, start_paused, volume_boost, trim_silence, segment)
 
 
 # ==========================================
@@ -1911,6 +2130,11 @@ def execute_standard_analysis(opts, links, info_box,
                 app.after(0, lambda m=result_text, c=col: update_info_box(info_box, m, c))
             else:
                 size_str = format_size(total_bytes)
+                _last_analyzed_meta[info_box] = {
+                    "title": title_str,
+                    "size": size_str,
+                    "total_bytes": total_bytes
+                }
                 if len(cleaned_links) == 1:
                     result_text = f"Title:  {title_str}\nSize:   {size_str}"
                 else:
@@ -1969,7 +2193,7 @@ def analyze_playlist(opts, link, scroll_frame, checkbox_state_list,
 
     def worker():
         local_opts = dict(opts)
-        local_opts['extract_flat'] = 'in_playlist' if is_audio else False
+        local_opts['extract_flat'] = 'in_playlist'
         local_opts['noplaylist']   = False
         valid_count = 0
 
@@ -2135,6 +2359,7 @@ def delete_history_entry(idx):
         refresh_history_tab()
 
 _history_thumb_cache = {}
+_thumb_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="ThumbWorker")
 
 def get_history_thumbnail(item_dict, label_widget):
     """
@@ -2235,6 +2460,9 @@ def get_history_thumbnail(item_dict, label_widget):
             if img.size != (64, 36):
                 img = img.resize((64, 36), Image.LANCZOS)
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(64, 36))
+            if len(_history_thumb_cache) > 100:
+                try: del _history_thumb_cache[next(iter(_history_thumb_cache))]
+                except Exception: pass
             _history_thumb_cache[cache_key] = ctk_img
             
             def _apply(expected_key=cache_key):
@@ -2249,7 +2477,10 @@ def get_history_thumbnail(item_dict, label_widget):
             except Exception:
                 pass
 
-    threading.Thread(target=_async_process, daemon=True).start()
+    try:
+        _thumb_pool.submit(_async_process)
+    except Exception:
+        pass
 
 hist_search_var = None
 hist_filter_var = None
@@ -2591,6 +2822,17 @@ def create_vid_options(parent):
         values=["None"] + list(SUBTITLE_LANG_MAP.keys()))
     s_menu.pack(side="left")
 
+    def _on_fmt_change(*args):
+        chosen = fmt_var.get()
+        if chosen == "mp4":
+            s_var.set("None")
+            s_menu.configure(state="disabled")
+        else:
+            s_menu.configure(state="normal")
+
+    fmt_var.trace_add("write", _on_fmt_change)
+    _on_fmt_change()
+
     # Row 2: Volume Boost | Silence Trimmer
     row2 = ctk.CTkFrame(frame, fg_color="transparent")
     row2.pack(fill="x", padx=12, pady=(2, 6))
@@ -2666,6 +2908,32 @@ def create_aud_options(parent):
     ctk.CTkCheckBox(row2, text="✂ Trim Silence", variable=silence_trim_var, font=("Segoe UI", 11)).pack(side="left")
 
     return q_var, fmt_var, vol_boost_var, silence_trim_var
+
+def create_segment_row(parent):
+    """Start/End timestamp clip trimmer inputs for Single Video & Single Audio."""
+    row = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=8)
+    row.pack(fill="x", padx=20, pady=(2, 6))
+    reg_widget(row, "panels")
+    
+    ctk.CTkLabel(row, text="✂ Clip Range:", font=LABEL_FONT).pack(side="left", padx=(12, 6), pady=6)
+    
+    ctk.CTkLabel(row, text="Start:", font=("Segoe UI", 11)).pack(side="left", padx=(0, 4))
+    start_var = ctk.StringVar(value="")
+    start_entry = ctk.CTkEntry(row, textvariable=start_var, width=75, font=ENTRY_FONT, placeholder_text="00:00")
+    start_entry.pack(side="left", padx=(0, 10))
+    reg_widget(start_entry, "entries")
+    
+    ctk.CTkLabel(row, text="End:", font=("Segoe UI", 11)).pack(side="left", padx=(0, 4))
+    end_var = ctk.StringVar(value="")
+    end_entry = ctk.CTkEntry(row, textvariable=end_var, width=75, font=ENTRY_FONT, placeholder_text="hh:mm:ss")
+    end_entry.pack(side="left", padx=(0, 10))
+    reg_widget(end_entry, "entries")
+    
+    hint_lbl = ctk.CTkLabel(row, text="(e.g. 1m 30s or 01:30 — empty for full)", font=("Segoe UI", 10), text_color=COL_MUTED)
+    hint_lbl.pack(side="left", padx=2)
+    reg_widget(hint_lbl, "muted_labels")
+    
+    return start_var, end_var
 
 def make_stale_banner(parent):
     """Full-width amber warning panel — impossible to miss."""
@@ -2790,11 +3058,14 @@ def act_svid_dl(start_paused=False):
     if not link:
         set_status("⚠  Paste a link first.", COL_WARN, "Single Video"); return
     title, size = get_info_details(vid_info_box, link)
+    start_t = vid_start_var.get().strip()
+    end_t = vid_end_var.get().strip()
+    seg_label = f"{start_t or '00:00'}-{end_t or 'end'}" if (start_t or end_t) else None
     run_download_thread(
-        get_video_opts(vid_q_var, vid_s_var, vid_fmt_var, vid_path_var.get()),
+        get_video_opts(vid_q_var, vid_s_var, vid_fmt_var, vid_path_var.get(), start_time=start_t, end_time=end_t),
         [link], vid_path_var.get(), "Single-Video", title, "Single Video",
         size, vid_q_var.get(), vid_fmt_var.get(), start_paused,
-        volume_boost=vid_vol_var.get(), trim_silence=vid_trim_var.get())
+        volume_boost=vid_vol_var.get(), trim_silence=vid_trim_var.get(), segment=seg_label)
 
 def act_saud_check():
     link = aud_entry.get().strip()
@@ -2811,11 +3082,14 @@ def act_saud_dl(start_paused=False):
     if not link:
         set_status("⚠  Paste a link first.", COL_WARN, "Single Audio"); return
     title, size = get_info_details(aud_info_box, link)
+    start_t = aud_start_var.get().strip()
+    end_t = aud_end_var.get().strip()
+    seg_label = f"{start_t or '00:00'}-{end_t or 'end'}" if (start_t or end_t) else None
     run_download_thread(
-        get_audio_opts(aud_q_var, aud_fmt_var, aud_path_var.get()),
+        get_audio_opts(aud_q_var, aud_fmt_var, aud_path_var.get(), start_time=start_t, end_time=end_t),
         [link], aud_path_var.get(), "Single-Audio", title, "Single Audio",
         size, aud_q_var.get(), aud_fmt_var.get(), start_paused,
-        volume_boost=aud_vol_var.get(), trim_silence=aud_trim_var.get())
+        volume_boost=aud_vol_var.get(), trim_silence=aud_trim_var.get(), segment=seg_label)
 
 def act_bvid_check():
     links = [l for l in bvid_text.get("1.0", "end").splitlines() if l.strip()]
@@ -2829,11 +3103,13 @@ def act_bvid_dl(start_paused=False):
     if not links:
         set_status("⚠  No links in the box.", COL_WARN, "Batch Video"); return
     title, size = get_info_details(bvid_info_box, "Batch Video")
-    run_download_thread(
-        get_video_opts(bvid_q_var, bvid_s_var, bvid_fmt_var, bvid_path_var.get()),
-        links, bvid_path_var.get(), "Batch-Video", title, "Batch Video",
-        size, bvid_q_var.get(), bvid_fmt_var.get(), start_paused,
-        volume_boost=bvid_vol_var.get(), trim_silence=bvid_trim_var.get())
+    opts = get_video_opts(bvid_q_var, bvid_s_var, bvid_fmt_var, bvid_path_var.get())
+    for i, link in enumerate(links):
+        hint = f"Batch Video [{i+1}/{len(links)}]" if len(links) > 1 else title
+        run_download_thread(
+            dict(opts), [link], bvid_path_var.get(), "Batch-Video", hint, "Batch Video",
+            size if len(links) == 1 else "Unknown", bvid_q_var.get(), bvid_fmt_var.get(), start_paused,
+            volume_boost=bvid_vol_var.get(), trim_silence=bvid_trim_var.get())
 
 def act_baud_check():
     links = [l for l in baud_text.get("1.0", "end").splitlines() if l.strip()]
@@ -2848,11 +3124,13 @@ def act_baud_dl(start_paused=False):
     if not links:
         set_status("⚠  No links in the box.", COL_WARN, "Batch Audio"); return
     title, size = get_info_details(baud_info_box, "Batch Audio")
-    run_download_thread(
-        get_audio_opts(baud_q_var, baud_fmt_var, baud_path_var.get()),
-        links, baud_path_var.get(), "Batch-Audio", title, "Batch Audio",
-        size, baud_q_var.get(), baud_fmt_var.get(), start_paused,
-        volume_boost=baud_vol_var.get(), trim_silence=baud_trim_var.get())
+    opts = get_audio_opts(baud_q_var, baud_fmt_var, baud_path_var.get())
+    for i, link in enumerate(links):
+        hint = f"Batch Audio [{i+1}/{len(links)}]" if len(links) > 1 else title
+        run_download_thread(
+            dict(opts), [link], baud_path_var.get(), "Batch-Audio", hint, "Batch Audio",
+            size if len(links) == 1 else "Unknown", baud_q_var.get(), baud_fmt_var.get(), start_paused,
+            volume_boost=baud_vol_var.get(), trim_silence=baud_trim_var.get())
 
 def act_pvid_check():
     analyze_playlist(
@@ -2897,6 +3175,7 @@ vid_entry = make_entry_row(t1_left, "Paste YouTube / any site URL here…")
 bind_url_hint(vid_entry, "Single Video", "Playlist Video")
 make_section_label(t1_left, "Options")
 vid_q_var, vid_s_var, vid_fmt_var, vid_vol_var, vid_trim_var = create_vid_options(t1_left)
+vid_start_var, vid_end_var = create_segment_row(t1_left)
 vid_path_var   = create_path_selector(t1_left, VID_DIR)
 vid_thumb_label = make_thumb_panel(t1_top)
 
@@ -2925,6 +3204,7 @@ aud_entry = make_entry_row(t2_left, "Paste YouTube / any site URL here…")
 bind_url_hint(aud_entry, "Single Audio", "Playlist Audio")
 make_section_label(t2_left, "Options")
 aud_q_var, aud_fmt_var, aud_vol_var, aud_trim_var = create_aud_options(t2_left)
+aud_start_var, aud_end_var = create_segment_row(t2_left)
 aud_path_var   = create_path_selector(t2_left, AUD_DIR)
 aud_thumb_label = make_thumb_panel(t2_top, "Thumbnail\nappears here")
 
@@ -3178,6 +3458,10 @@ lbl_q_active = ctk.CTkLabel(net_top, text="⬇ Active: 0", font=("Segoe UI", 11)
 lbl_q_active.pack(side="left", padx=(0, 18))
 lbl_q_active_ref = lbl_q_active
 
+lbl_q_pending = ctk.CTkLabel(net_top, text="⏳ Pending: 0", font=("Segoe UI", 11), text_color=COL_MUTED)
+lbl_q_pending.pack(side="left", padx=(0, 18))
+lbl_q_pending_ref = lbl_q_pending
+
 lbl_q_total = ctk.CTkLabel(net_top, text="📦 Session: 0 completed", font=("Segoe UI", 11), text_color=COL_MUTED)
 lbl_q_total.pack(side="right")
 lbl_q_total_ref = lbl_q_total
@@ -3195,7 +3479,15 @@ queue_filter_var = ctk.StringVar(value="All")
 queue_search_entry = ctk.CTkEntry(queue_ctrl, placeholder_text="🔍 Filter queue...",
                                   textvariable=queue_search_var, width=200, font=("Segoe UI", 12))
 queue_search_entry.pack(side="left", padx=(0, 6))
-queue_search_var.trace_add("write", lambda *_: refresh_queue_tab())
+
+_queue_search_timer = None
+def _on_queue_search_change(*_):
+    global _queue_search_timer
+    if _queue_search_timer:
+        try: app.after_cancel(_queue_search_timer)
+        except Exception: pass
+    _queue_search_timer = app.after(250, refresh_queue_tab)
+queue_search_var.trace_add("write", _on_queue_search_change)
 
 def _set_queue_filter(st):
     queue_filter_var.set(st)
@@ -3236,7 +3528,14 @@ hist_search_entry = ctk.CTkEntry(
     textvariable=hist_search_var, font=("Segoe UI", 12), height=32
 )
 hist_search_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
-hist_search_var.trace_add("write", lambda *_: refresh_history_tab())
+_hist_search_timer = None
+def _on_hist_search_change(*_):
+    global _hist_search_timer
+    if _hist_search_timer:
+        try: app.after_cancel(_hist_search_timer)
+        except Exception: pass
+    _hist_search_timer = app.after(250, refresh_history_tab)
+hist_search_var.trace_add("write", _on_hist_search_change)
 
 def _clear_search():
     hist_search_var.set("")
@@ -3743,6 +4042,24 @@ for _sv in [global_cookie_var, global_cookie_file_var, global_max_downloads_var,
     _sv.trace_add("write", _autosave)
 global_ratelimit_entry.bind("<FocusOut>", _autosave)
 global_proxy_entry.bind("<FocusOut>", _autosave)
+
+def on_app_close():
+    try:
+        cancel_event.set()
+        global_queue.queue_cancel.set()
+        for jid, ev in list(global_queue.cancel_events.items()):
+            try: ev.set()
+            except Exception: pass
+        save_queue()
+        save_settings()
+        if '_thumb_pool' in globals():
+            _thumb_pool.shutdown(wait=False, cancel_futures=True)
+    except Exception:
+        pass
+    finally:
+        app.destroy()
+
+app.protocol("WM_DELETE_WINDOW", on_app_close)
 
 load_queue()
 app.mainloop()

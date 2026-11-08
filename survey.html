@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hedra Downloader PRO — استطلاع رأي مصر</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(18, 26, 44, 0.88);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --accent: #3b82f6;
+      --accent-glow: rgba(59, 130, 246, 0.35);
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Cairo', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 24px 16px;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.15), transparent 40%),
+        radial-gradient(circle at 85% 85%, rgba(139, 92, 246, 0.15), transparent 40%);
+    }
+
+    .survey-container {
+      width: 100%;
+      max-width: 650px;
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 32px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .header-badge {
+      display: inline-block;
+      padding: 4px 14px;
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #60a5fa;
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: 20px;
+      margin-bottom: 10px;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      font-weight: 800;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #ffffff 0%, #93c5fd 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header p {
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .question-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #f3f4f6;
+    }
+
+    .question-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .option-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .option-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .option-item:hover {
+      background: rgba(59, 130, 246, 0.08);
+      border-color: rgba(59, 130, 246, 0.4);
+    }
+
+    .option-item.selected {
+      background: rgba(59, 130, 246, 0.15);
+      border-color: #3b82f6;
+    }
+
+    .option-checkbox {
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      margin-left: 12px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .option-item.selected .option-checkbox {
+      background: #3b82f6;
+      border-color: #3b82f6;
+    }
+
+    .option-label {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .textarea-input {
+      width: 100%;
+      height: 90px;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      resize: none;
+      margin-bottom: 16px;
+    }
+
+    .btn-group {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 20px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="survey-container">
+    <div class="header">
+      <span class="header-badge">استطلاع رأي مصر 🇪🇬</span>
+      <h1>Hedra Downloader PRO</h1>
+      <p>شاركنا رأيك في دقيقة واحدة واكسب <strong>خصم 50% كود VIP + تجربة مجانية</strong>!</p>
+    </div>
+
+    <form id="surveyForm">
+      
+      <div class="question-title">1. إيه أكتر المواقع اللي بتحتاج تنزل منها؟</div>
+      <div class="option-grid">
+        <label class="option-item" onclick="this.classList.toggle('selected')">
+          <div class="option-checkbox"></div>
+          <span class="option-label">🟦 فيسبوك (ريلز وفيديوهات)</span>
+        </label>
+        <label class="option-item" onclick="this.classList.toggle('selected')">
+          <div class="option-checkbox"></div>
+          <span class="option-label">📺 يوتيوب (4K وشورتس)</span>
+        </label>
+        <label class="option-item" onclick="this.classList.toggle('selected')">
+          <div class="option-checkbox"></div>
+          <span class="option-label">🎵 تيك توك بدون علامة مائية</span>
+        </label>
+        <label class="option-item" onclick="this.classList.toggle('selected')">
+          <div class="option-checkbox"></div>
+          <span class="option-label">📸 إنستجرام (ريلز وستوريز)</span>
+        </label>
+      </div>
+
+      <div class="question-title">2. السعر المناسب ليك لشراء النسخة الكاملة (PRO)؟</div>
+      <div class="option-grid">
+        <label class="option-item" onclick="selectSingle(this)">
+          <div class="option-checkbox"></div>
+          <span class="option-label">🎁 اشتراك شهري: 50 - 75 جنيه / شهرياً</span>
+        </label>
+        <label class="option-item" onclick="selectSingle(this)">
+          <div class="option-checkbox"></div>
+          <span class="option-label">⭐ اشتراك شهري مميز: 80 - 100 جنيه / شهرياً</span>
+        </label>
+        <label class="option-item" onclick="selectSingle(this)">
+          <div class="option-checkbox"></div>
+          <span class="option-label">💎 مدى الحياة (Lifetime): 250 - 350 جنيه (دفعة واحدة للأبد)</span>
+        </label>
+      </div>
+
+      <div class="question-title">3. طريقة الدفع المفضلة في مصر؟</div>
+      <div class="option-grid">
+        <label class="option-item" onclick="this.classList.toggle('selected')">
+          <div class="option-checkbox"></div>
+          <span class="option-label">🟣 InstaPay (انستا باي)</span>
+        </label>
+        <label class="option-item" onclick="this.classList.toggle('selected')">
+          <div class="option-checkbox"></div>
+          <span class="option-label">🔴 فودافون كاش / المحافظ الإلكترونية</span>
+        </label>
+        <label class="option-item" onclick="this.classList.toggle('selected')">
+          <div class="option-checkbox"></div>
+          <span class="option-label">💳 كارت بنكي (ميزة / فيزا / ماستركارد)</span>
+        </label>
+      </div>
+
+      <div class="question-title">4. رأيك أو أي ميزة تحب نضيفها للبرنامج؟</div>
+      <textarea class="textarea-input" placeholder="اكتب رأيك أو اقتراحك هنا (اختياري)..."></textarea>
+
+      <div class="btn-group">
+        <div></div>
+        <button type="button" class="btn btn-primary" onclick="alert('شكراً لمشاركتك! كود الخصم: PROLAUNCH50')">إرسال الاستبيان 🎉</button>
+      </div>
+
+    </form>
+  </div>
+
+  <script>
+    function selectSingle(element) {
+      const parent = element.parentElement;
+      parent.querySelectorAll('.option-item').forEach(item => item.classList.remove('selected'));
+      element.classList.add('selected');
+    }
+  </script>
+
+</body>
+</html>

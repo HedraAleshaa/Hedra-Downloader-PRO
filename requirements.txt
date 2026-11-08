@@ -1,5 +1,6 @@
-customtkinter>=5.2.0
-yt-dlp>=2024.08.06
+customtkinter>=5.2.2
+yt-dlp>=2026.10.26
 pillow>=10.0.0
 mutagen>=1.47.0
+windnd>=1.0.7; sys_platform == 'win32'
 pyinstaller>=6.0.0
