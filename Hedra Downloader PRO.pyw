@@ -78,15 +78,53 @@ def get_ffmpeg_path():
     bin_name = "ffmpeg.exe" if platform.system() == "Windows" else "ffmpeg"
     if hasattr(sys, '_MEIPASS') and os.path.isfile(os.path.join(sys._MEIPASS, bin_name)):
         return sys._MEIPASS
-    exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else (os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd())
-    if os.path.isfile(os.path.join(exe_dir, bin_name)):
-        return exe_dir
-    if os.path.isfile(os.path.join(os.getcwd(), bin_name)):
-        return os.getcwd()
-    for p in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]:
-        if os.path.isfile(os.path.join(p, "ffmpeg")):
-            return p
-    return exe_dir
+
+    candidates = []
+    if getattr(sys, 'frozen', False):
+        exe_d = os.path.dirname(os.path.abspath(sys.executable))
+        candidates.extend([exe_d, os.path.dirname(exe_d)])
+    if '__file__' in globals():
+        file_d = os.path.dirname(os.path.abspath(__file__))
+        candidates.extend([file_d, os.path.dirname(file_d)])
+    candidates.append(os.getcwd())
+    
+    if platform.system() == "Windows":
+        candidates.extend([
+            r"C:\ffmpeg\bin",
+            r"C:\ffmpeg",
+            r"C:\Program Files\ffmpeg\bin",
+            r"C:\Program Files\ffmpeg",
+        ])
+    else:
+        candidates.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"])
+
+    for d in candidates:
+        if d and os.path.isdir(d):
+            if os.path.isfile(os.path.join(d, bin_name)):
+                return os.path.abspath(d)
+                
+    import shutil
+    which_p = shutil.which("ffmpeg")
+    if which_p:
+        return os.path.dirname(os.path.abspath(which_p))
+
+    return candidates[0] if candidates else os.getcwd()
+
+def format_duration(seconds):
+    if seconds is None:
+        return "00:00"
+    try:
+        s = int(round(float(seconds)))
+    except (ValueError, TypeError):
+        return "00:00"
+    if s < 0:
+        s = 0
+    h = s // 3600
+    m = (s % 3600) // 60
+    sec = s % 60
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{sec:02d}"
+    return f"{m:02d}:{sec:02d}"
 
 if platform.system() != "Windows":
     for _extra in ["/opt/homebrew/bin", "/usr/local/bin"]:
@@ -96,6 +134,9 @@ if platform.system() != "Windows":
 APP_VERSION  = "2.2"
 APP_AUTHOR   = "Hedra Aleshaa"
 FFMPEG_DIR   = get_ffmpeg_path()
+if FFMPEG_DIR and os.path.isdir(FFMPEG_DIR):
+    if FFMPEG_DIR not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
 BASE_DIR     = os.path.join(os.path.expanduser("~"), "Downloads", "YT Downloader")
 VID_DIR      = os.path.join(BASE_DIR, "Video")
 AUD_DIR      = os.path.join(BASE_DIR, "Audio")
@@ -855,14 +896,18 @@ def parse_rate_limit(text):
 # ==========================================
 #  CLIPBOARD PASTE HELPERS
 # ==========================================
-def bind_url_change_clear(entry, info_box, stale_banner=None):
+def bind_url_change_clear(entry, info_box, stale_banner=None, trimmer=None):
     def on_change(event):
         if event.keysym in ["Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Up", "Down", "Left", "Right", "Tab"]: return
         text = info_box.get("1.0", "end").strip()
         if text and text not in ["—", "Analyzing…  please wait."]:
             update_info_box(info_box, "—", COL_MUTED)
             if stale_banner: stale_banner.configure(text="")
+            if trimmer: trimmer.reset()
     entry.bind("<KeyRelease>", on_change)
+
+vid_trimmer = None
+aud_trimmer = None
 
 def bind_text_change_clear(textbox, info_box, stale_banner=None):
     def on_change(event):
@@ -2095,6 +2140,7 @@ def execute_standard_analysis(opts, links, info_box,
         title_str   = "Unknown"
         thumb_url   = None
         last_error  = ""
+        first_info  = None
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 for i, link in enumerate(cleaned_links):
@@ -2102,6 +2148,8 @@ def execute_standard_analysis(opts, links, info_box,
                         raise ValueError("PROCESS_CANCELLED")
                     try:
                         info       = ydl.extract_info(link, download=False)
+                        if i == 0 and info:
+                            first_info = info
                         size_bytes = extract_size_from_info(info, is_audio, audio_bitrate, target_quality)
                         total_bytes += size_bytes
                         successful  += 1
@@ -2130,11 +2178,20 @@ def execute_standard_analysis(opts, links, info_box,
                 app.after(0, lambda m=result_text, c=col: update_info_box(info_box, m, c))
             else:
                 size_str = format_size(total_bytes)
+                duration = 0
+                if first_info and isinstance(first_info, dict):
+                    duration = first_info.get('duration') or 0
                 _last_analyzed_meta[info_box] = {
                     "title": title_str,
                     "size": size_str,
-                    "total_bytes": total_bytes
+                    "total_bytes": total_bytes,
+                    "duration": duration
                 }
+                if tab == "Single Video" and 'vid_trimmer' in globals() and vid_trimmer:
+                    app.after(0, lambda d=duration, b=total_bytes: vid_trimmer.update_meta(d, b))
+                elif tab == "Single Audio" and 'aud_trimmer' in globals() and aud_trimmer:
+                    app.after(0, lambda d=duration, b=total_bytes: aud_trimmer.update_meta(d, b))
+
                 if len(cleaned_links) == 1:
                     result_text = f"Title:  {title_str}\nSize:   {size_str}"
                 else:
@@ -2909,31 +2966,187 @@ def create_aud_options(parent):
 
     return q_var, fmt_var, vol_boost_var, silence_trim_var
 
-def create_segment_row(parent):
-    """Start/End timestamp clip trimmer inputs for Single Video & Single Audio."""
-    row = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=8)
-    row.pack(fill="x", padx=20, pady=(2, 6))
-    reg_widget(row, "panels")
+def create_trimmer_card(parent, media_type="Video"):
+    """Interactive Start/End slider-based clip trimmer card with dynamic size calculation."""
+    card = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=8)
+    card.pack(fill="x", padx=20, pady=(2, 6))
+    reg_widget(card, "panels")
     
-    ctk.CTkLabel(row, text="✂ Clip Range:", font=LABEL_FONT).pack(side="left", padx=(12, 6), pady=6)
+    state = {
+        "duration": 0.0,
+        "full_bytes": 0,
+        "is_syncing": False
+    }
+
+    # Header Row: Title + Live Size Badge + Reset Button
+    hdr = ctk.CTkFrame(card, fg_color="transparent")
+    hdr.pack(fill="x", padx=12, pady=(6, 2))
     
-    ctk.CTkLabel(row, text="Start:", font=("Segoe UI", 11)).pack(side="left", padx=(0, 4))
-    start_var = ctk.StringVar(value="")
-    start_entry = ctk.CTkEntry(row, textvariable=start_var, width=75, font=ENTRY_FONT, placeholder_text="00:00")
-    start_entry.pack(side="left", padx=(0, 10))
+    t_lbl = ctk.CTkLabel(hdr, text="✂ Clip Range:", font=LABEL_FONT)
+    t_lbl.pack(side="left", padx=(0, 8))
+    
+    size_lbl = ctk.CTkLabel(hdr, text="Full media (no trim)", font=("Segoe UI", 11, "bold"), text_color=COL_MUTED)
+    size_lbl.pack(side="left", padx=2)
+    
+    def reset_to_full():
+        state["is_syncing"] = True
+        dur = state["duration"] or 100.0
+        start_slider.set(0)
+        end_slider.set(dur)
+        start_var.set("00:00")
+        end_var.set(format_duration(state["duration"]) if state["duration"] > 0 else "")
+        state["is_syncing"] = False
+        recalc_size()
+        
+    reset_btn = ctk.CTkButton(
+        hdr, text="↺ Full", width=55, height=22, font=("Segoe UI", 10, "bold"),
+        fg_color=COL_CHECK, hover_color=COL_CHECKH, text_color=COL_TEXT,
+        command=reset_to_full
+    )
+    reset_btn.pack(side="right")
+    reg_widget(reset_btn, "check_btns")
+
+    # Start Row
+    row_s = ctk.CTkFrame(card, fg_color="transparent")
+    row_s.pack(fill="x", padx=12, pady=(2, 2))
+    
+    ctk.CTkLabel(row_s, text="Start:", font=("Segoe UI", 11), width=40, anchor="w").pack(side="left")
+    start_var = ctk.StringVar(value="00:00")
+    start_entry = ctk.CTkEntry(row_s, textvariable=start_var, width=65, font=ENTRY_FONT, height=26)
+    start_entry.pack(side="left", padx=(0, 8))
     reg_widget(start_entry, "entries")
     
-    ctk.CTkLabel(row, text="End:", font=("Segoe UI", 11)).pack(side="left", padx=(0, 4))
+    start_slider = ctk.CTkSlider(row_s, from_=0, to=100, number_of_steps=100, height=16)
+    start_slider.set(0)
+    start_slider.pack(side="left", fill="x", expand=True)
+
+    # End Row
+    row_e = ctk.CTkFrame(card, fg_color="transparent")
+    row_e.pack(fill="x", padx=12, pady=(2, 6))
+    
+    ctk.CTkLabel(row_e, text="End:", font=("Segoe UI", 11), width=40, anchor="w").pack(side="left")
     end_var = ctk.StringVar(value="")
-    end_entry = ctk.CTkEntry(row, textvariable=end_var, width=75, font=ENTRY_FONT, placeholder_text="hh:mm:ss")
-    end_entry.pack(side="left", padx=(0, 10))
+    end_entry = ctk.CTkEntry(row_e, textvariable=end_var, width=65, font=ENTRY_FONT, height=26, placeholder_text="End")
+    end_entry.pack(side="left", padx=(0, 8))
     reg_widget(end_entry, "entries")
     
-    hint_lbl = ctk.CTkLabel(row, text="(e.g. 1m 30s or 01:30 — empty for full)", font=("Segoe UI", 10), text_color=COL_MUTED)
-    hint_lbl.pack(side="left", padx=2)
-    reg_widget(hint_lbl, "muted_labels")
-    
-    return start_var, end_var
+    end_slider = ctk.CTkSlider(row_e, from_=0, to=100, number_of_steps=100, height=16)
+    end_slider.set(100)
+    end_slider.pack(side="left", fill="x", expand=True)
+
+    def recalc_size():
+        s = start_slider.get()
+        e = end_slider.get()
+        dur = state["duration"]
+        fbytes = state["full_bytes"]
+        
+        is_trimmed = (s > 0.5) or (dur > 0 and e < dur - 0.5) or (dur == 0 and e < 99.5 and end_var.get().strip() != "")
+        if not is_trimmed:
+            if fbytes > 0:
+                size_lbl.configure(text=f"Full: {format_size(fbytes)} ({format_duration(dur)})", text_color=COL_MUTED)
+            else:
+                size_lbl.configure(text="Full media (no trim)", text_color=COL_MUTED)
+            return
+
+        clip_sec = max(0.0, e - s)
+        if dur > 0 and fbytes > 0:
+            est_b = int((clip_sec / dur) * fbytes)
+            size_lbl.configure(
+                text=f"✂ Clip: {format_size(est_b)} ({format_duration(clip_sec)})  •  Full: {format_size(fbytes)}",
+                text_color=COL_SUCCESS
+            )
+        else:
+            size_lbl.configure(text=f"✂ Clip Duration: {format_duration(clip_sec)}", text_color=COL_ACCENT)
+
+    def on_start_slide(val):
+        if state["is_syncing"]: return
+        state["is_syncing"] = True
+        s = float(val)
+        e = end_slider.get()
+        if s > e:
+            e = s
+            end_slider.set(e)
+            end_var.set(format_duration(e))
+        start_var.set(format_duration(s))
+        state["is_syncing"] = False
+        recalc_size()
+
+    def on_end_slide(val):
+        if state["is_syncing"]: return
+        state["is_syncing"] = True
+        e = float(val)
+        s = start_slider.get()
+        if e < s:
+            s = e
+            start_slider.set(s)
+            start_var.set(format_duration(s))
+        end_var.set(format_duration(e))
+        state["is_syncing"] = False
+        recalc_size()
+
+    start_slider.configure(command=on_start_slide)
+    end_slider.configure(command=on_end_slide)
+
+    def on_start_text_change(*_):
+        if state["is_syncing"]: return
+        t = start_var.get().strip()
+        sec = parse_timestamp(t)
+        if sec is not None:
+            state["is_syncing"] = True
+            dur = state["duration"] or 100.0
+            sec = min(dur, max(0.0, sec))
+            start_slider.set(sec)
+            state["is_syncing"] = False
+            recalc_size()
+
+    def on_end_text_change(*_):
+        if state["is_syncing"]: return
+        t = end_var.get().strip()
+        sec = parse_timestamp(t)
+        if sec is not None:
+            state["is_syncing"] = True
+            dur = state["duration"] or 100.0
+            sec = min(dur, max(0.0, sec))
+            end_slider.set(sec)
+            state["is_syncing"] = False
+            recalc_size()
+
+    start_var.trace_add("write", on_start_text_change)
+    end_var.trace_add("write", on_end_text_change)
+
+    class TrimmerController:
+        def update_meta(self, duration, full_bytes):
+            state["is_syncing"] = True
+            state["duration"] = float(duration or 0.0)
+            state["full_bytes"] = int(full_bytes or 0)
+            dur = state["duration"]
+            if dur > 0:
+                start_slider.configure(from_=0, to=dur, number_of_steps=max(10, int(dur)))
+                end_slider.configure(from_=0, to=dur, number_of_steps=max(10, int(dur)))
+                start_slider.set(0)
+                end_slider.set(dur)
+                start_var.set("00:00")
+                end_var.set(format_duration(dur))
+            state["is_syncing"] = False
+            recalc_size()
+
+        def get_range(self):
+            s = start_slider.get()
+            e = end_slider.get()
+            dur = state["duration"]
+            fbytes = state["full_bytes"]
+            is_trimmed = (s > 0.5) or (dur > 0 and e < dur - 0.5) or (dur == 0 and e < 99.5 and end_var.get().strip() != "")
+            if not is_trimmed:
+                return None, None, False, None
+            clip_sec = max(0.0, e - s)
+            est_b = int((clip_sec / dur) * fbytes) if (dur > 0 and fbytes > 0) else 0
+            size_str = format_size(est_b) if est_b > 0 else None
+            return format_duration(s), format_duration(e), True, size_str
+
+        def reset(self):
+            reset_to_full()
+
+    return TrimmerController()
 
 def make_stale_banner(parent):
     """Full-width amber warning panel — impossible to miss."""
@@ -3057,14 +3270,16 @@ def act_svid_dl(start_paused=False):
     link = vid_entry.get().strip()
     if not link:
         set_status("⚠  Paste a link first.", COL_WARN, "Single Video"); return
-    title, size = get_info_details(vid_info_box, link)
-    start_t = vid_start_var.get().strip()
-    end_t = vid_end_var.get().strip()
-    seg_label = f"{start_t or '00:00'}-{end_t or 'end'}" if (start_t or end_t) else None
+    title, full_size = get_info_details(vid_info_box, link)
+    start_t, end_t, is_trimmed, clip_size = vid_trimmer.get_range() if vid_trimmer else (None, None, False, None)
+    seg_label = f"{start_t}-{end_t}" if is_trimmed else None
+    size_to_pass = clip_size if (is_trimmed and clip_size) else full_size
     run_download_thread(
-        get_video_opts(vid_q_var, vid_s_var, vid_fmt_var, vid_path_var.get(), start_time=start_t, end_time=end_t),
+        get_video_opts(vid_q_var, vid_s_var, vid_fmt_var, vid_path_var.get(),
+                       start_time=start_t if is_trimmed else None,
+                       end_time=end_t if is_trimmed else None),
         [link], vid_path_var.get(), "Single-Video", title, "Single Video",
-        size, vid_q_var.get(), vid_fmt_var.get(), start_paused,
+        size_to_pass, vid_q_var.get(), vid_fmt_var.get(), start_paused,
         volume_boost=vid_vol_var.get(), trim_silence=vid_trim_var.get(), segment=seg_label)
 
 def act_saud_check():
@@ -3081,14 +3296,16 @@ def act_saud_dl(start_paused=False):
     link = aud_entry.get().strip()
     if not link:
         set_status("⚠  Paste a link first.", COL_WARN, "Single Audio"); return
-    title, size = get_info_details(aud_info_box, link)
-    start_t = aud_start_var.get().strip()
-    end_t = aud_end_var.get().strip()
-    seg_label = f"{start_t or '00:00'}-{end_t or 'end'}" if (start_t or end_t) else None
+    title, full_size = get_info_details(aud_info_box, link)
+    start_t, end_t, is_trimmed, clip_size = aud_trimmer.get_range() if aud_trimmer else (None, None, False, None)
+    seg_label = f"{start_t}-{end_t}" if is_trimmed else None
+    size_to_pass = clip_size if (is_trimmed and clip_size) else full_size
     run_download_thread(
-        get_audio_opts(aud_q_var, aud_fmt_var, aud_path_var.get(), start_time=start_t, end_time=end_t),
+        get_audio_opts(aud_q_var, aud_fmt_var, aud_path_var.get(),
+                       start_time=start_t if is_trimmed else None,
+                       end_time=end_t if is_trimmed else None),
         [link], aud_path_var.get(), "Single-Audio", title, "Single Audio",
-        size, aud_q_var.get(), aud_fmt_var.get(), start_paused,
+        size_to_pass, aud_q_var.get(), aud_fmt_var.get(), start_paused,
         volume_boost=aud_vol_var.get(), trim_silence=aud_trim_var.get(), segment=seg_label)
 
 def act_bvid_check():
@@ -3175,7 +3392,7 @@ vid_entry = make_entry_row(t1_left, "Paste YouTube / any site URL here…")
 bind_url_hint(vid_entry, "Single Video", "Playlist Video")
 make_section_label(t1_left, "Options")
 vid_q_var, vid_s_var, vid_fmt_var, vid_vol_var, vid_trim_var = create_vid_options(t1_left)
-vid_start_var, vid_end_var = create_segment_row(t1_left)
+vid_trimmer = create_trimmer_card(t1_left, "Video")
 vid_path_var   = create_path_selector(t1_left, VID_DIR)
 vid_thumb_label = make_thumb_panel(t1_top)
 
@@ -3186,7 +3403,7 @@ vid_info_box   = make_info_box(t1_scroll_main, height=65)
 btn_dl_vid, btn_q_vid = make_dl_btn_group(t1_scroll_main, "⬇  Download Video", act_svid_dl, lambda: act_svid_dl(start_paused=True))
 bind_keyboard_shortcuts(vid_entry, act_svid_dl)
 attach_auto_check([vid_q_var, vid_s_var, vid_fmt_var, vid_vol_var], vid_entry, act_svid_check)
-bind_url_change_clear(vid_entry, vid_info_box, vid_stale_banner)
+bind_url_change_clear(vid_entry, vid_info_box, vid_stale_banner, vid_trimmer)
 
 # ==========================================
 #  TAB 2 — SINGLE AUDIO
@@ -3204,7 +3421,7 @@ aud_entry = make_entry_row(t2_left, "Paste YouTube / any site URL here…")
 bind_url_hint(aud_entry, "Single Audio", "Playlist Audio")
 make_section_label(t2_left, "Options")
 aud_q_var, aud_fmt_var, aud_vol_var, aud_trim_var = create_aud_options(t2_left)
-aud_start_var, aud_end_var = create_segment_row(t2_left)
+aud_trimmer = create_trimmer_card(t2_left, "Audio")
 aud_path_var   = create_path_selector(t2_left, AUD_DIR)
 aud_thumb_label = make_thumb_panel(t2_top, "Thumbnail\nappears here")
 
@@ -3215,7 +3432,7 @@ aud_info_box   = make_info_box(t2_scroll_main, height=65)
 btn_dl_aud, btn_q_aud = make_dl_btn_group(t2_scroll_main, "⬇  Download Audio", act_saud_dl, lambda: act_saud_dl(start_paused=True))
 bind_keyboard_shortcuts(aud_entry, act_saud_dl)
 attach_auto_check([aud_q_var, aud_fmt_var, aud_vol_var], aud_entry, act_saud_check)
-bind_url_change_clear(aud_entry, aud_info_box, aud_stale_banner)
+bind_url_change_clear(aud_entry, aud_info_box, aud_stale_banner, aud_trimmer)
 
 # ==========================================
 #  TAB 3 — BATCH VIDEO
