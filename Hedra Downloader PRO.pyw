@@ -560,7 +560,7 @@ def load_history():
         pass
     return []
 
-def save_history_entry(title, url, mode, size_str, quality="—", file_type="—", file_path="", thumbnail=""):
+def save_history_entry(title, url, mode, size_str, quality="—", file_type="—", file_path="", thumbnail="", segment="", duration=""):
     history = load_history()
     history.insert(0, {
         "time":      time.strftime("%Y-%m-%d %H:%M"),
@@ -572,6 +572,8 @@ def save_history_entry(title, url, mode, size_str, quality="—", file_type="—
         "file_type": file_type,
         "file_path": file_path or "",
         "thumbnail": thumbnail or "",
+        "segment":   segment or "",
+        "duration":  duration or "",
     })
     history = history[:200]
     try:
@@ -620,14 +622,21 @@ def save_settings():
 #  CROSS-PLATFORM LAUNCHERS & NOTIFIERS
 # ==========================================
 def open_folder(path):
-    os.makedirs(path, exist_ok=True)
+    if not path: return
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception:
+        pass
     system = platform.system()
-    if system == "Windows":
-        os.startfile(path)
-    elif system == "Darwin":
-        subprocess.run(["open", path])
-    else:
-        subprocess.run(["xdg-open", path])
+    try:
+        if system == "Windows":
+            os.startfile(os.path.normpath(path))
+        elif system == "Darwin":
+            subprocess.run(["open", path])
+        else:
+            subprocess.run(["xdg-open", path])
+    except Exception:
+        pass
 
 def open_file_direct(path):
     """Launch file directly in user's default OS media player."""
@@ -635,7 +644,7 @@ def open_file_direct(path):
     try:
         system = platform.system()
         if system == "Windows":
-            os.startfile(path)
+            os.startfile(os.path.normpath(path))
         elif system == "Darwin":
             subprocess.run(["open", path])
         else:
@@ -645,19 +654,60 @@ def open_file_direct(path):
         return False
 
 def show_in_explorer(path):
-    """Select and highlight the file inside Windows Explorer."""
-    if not path or not os.path.exists(path): return False
+    """Select and highlight the file inside Windows Explorer without falling back to Documents."""
+    if not path: return False
+    path = os.path.normpath(path)
+    if not os.path.exists(path):
+        folder = os.path.dirname(path)
+        if os.path.isdir(folder):
+            open_folder(folder)
+            return True
+        return False
     try:
         system = platform.system()
         if system == "Windows":
-            subprocess.run(['explorer.exe', f'/select,{os.path.normpath(path)}'], shell=False)
+            # Passing raw string argument prevents list2cmdline from quoting '/select,' with path
+            subprocess.Popen(f'explorer /select,"{path}"')
         elif system == "Darwin":
             subprocess.run(["open", "-R", path])
         else:
             open_folder(os.path.dirname(path))
         return True
     except Exception:
-        return False
+        try:
+            open_folder(os.path.dirname(path))
+            return True
+        except Exception:
+            return False
+
+def get_media_duration_seconds(file_path):
+    """Extract exact media duration in seconds via ffprobe safely."""
+    if not file_path or not os.path.isfile(file_path):
+        return None
+    ffprobe_candidates = []
+    if FFMPEG_DIR and os.path.isdir(FFMPEG_DIR):
+        ffprobe_candidates.append(os.path.join(FFMPEG_DIR, "ffprobe.exe" if platform.system() == "Windows" else "ffprobe"))
+    if hasattr(sys, '_MEIPASS'):
+        ffprobe_candidates.append(os.path.join(sys._MEIPASS, "ffprobe.exe" if platform.system() == "Windows" else "ffprobe"))
+    ffprobe_candidates.append("ffprobe")
+    
+    probe_bin = "ffprobe"
+    for cand in ffprobe_candidates:
+        if os.path.isfile(cand):
+            probe_bin = cand
+            break
+            
+    try:
+        creationflags = 0x08000000 if platform.system() == "Windows" else 0
+        res = subprocess.run(
+            [probe_bin, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path],
+            capture_output=True, text=True, timeout=3, creationflags=creationflags
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return float(res.stdout.strip())
+    except Exception:
+        pass
+    return None
 
 def find_downloaded_file(title, mode=""):
     """Fallback locator to find downloaded file in target folders if path was modified."""
@@ -1989,10 +2039,40 @@ class JobQueue:
                     except Exception:
                         pass
                         
+                    # Determine true physical file size on disk
+                    if fpath and os.path.isfile(fpath):
+                        try:
+                            disk_b = os.path.getsize(fpath)
+                            if disk_b > 0:
+                                sz_str = format_size(disk_b)
+                                job["size"] = sz_str
+                        except Exception:
+                            pass
+
+                    # Determine media duration for history
+                    dur_str = ""
+                    seg = job.get("segment") or ""
+                    if seg and "-" in seg:
+                        try:
+                            s_p, e_p = seg.split("-", 1)
+                            s_v, e_v = parse_timestamp(s_p), parse_timestamp(e_p)
+                            if s_v is not None and e_v is not None and e_v > s_v:
+                                dur_str = format_duration(e_v - s_v)
+                        except Exception:
+                            pass
+                    if not dur_str and isinstance(info, dict):
+                        tot_dur = info.get("duration")
+                        if tot_dur and tot_dur > 0:
+                            dur_str = format_duration(tot_dur)
+                    if not dur_str and fpath and os.path.isfile(fpath):
+                        disk_sec = get_media_duration_seconds(fpath)
+                        if disk_sec and disk_sec > 0:
+                            dur_str = format_duration(disk_sec)
+
                     _, best_thumb = extract_better_metadata(info if isinstance(info, dict) else {}, title)
                     if not best_thumb and isinstance(info, dict):
                         best_thumb = info.get("thumbnail") or ""
-                    save_history_entry(title, link, job["mode"], sz_str, job.get("quality", "—"), job.get("file_type", "—"), file_path=fpath, thumbnail=best_thumb)
+                    save_history_entry(title, link, job["mode"], sz_str, job.get("quality", "—"), job.get("file_type", "—"), file_path=fpath, thumbnail=best_thumb, segment=seg, duration=dur_str)
                     job["fpath"] = fpath
             
             app.after(0, _increment_session_counter)
@@ -2539,6 +2619,47 @@ def get_history_thumbnail(item_dict, label_widget):
     except Exception:
         pass
 
+_history_dur_cache = {}
+
+def _update_history_specs_label(label_widget, h_dict):
+    try:
+        if not label_widget.winfo_exists(): return
+        parts = [h_dict.get('quality', '—'), h_dict.get('file_type', '—')]
+        seg = h_dict.get('segment') or ''
+        if seg:
+            parts.append(f"✂ Clip ({seg})")
+        elif 'clip' in h_dict.get('mode', '').lower() or '→' in h_dict.get('mode', ''):
+            parts.append("✂ Clip")
+        dur = h_dict.get('duration') or ''
+        if dur:
+            parts.append(f"⏱ {dur}")
+        label_widget.configure(text="  |  ".join(parts))
+    except Exception:
+        pass
+
+def _probe_history_duration_async(file_path, label_widget, h_dict):
+    if file_path in _history_dur_cache:
+        d = _history_dur_cache[file_path]
+        if d:
+            h_dict['duration'] = d
+            _update_history_specs_label(label_widget, h_dict)
+        return
+        
+    def _worker():
+        sec = get_media_duration_seconds(file_path)
+        if sec and sec > 0:
+            d_str = format_duration(sec)
+            _history_dur_cache[file_path] = d_str
+            h_dict['duration'] = d_str
+            try:
+                app.after(0, lambda: _update_history_specs_label(label_widget, h_dict))
+            except Exception:
+                pass
+    try:
+        _thumb_pool.submit(_worker)
+    except Exception:
+        pass
+
 hist_search_var = None
 hist_filter_var = None
 
@@ -2577,6 +2698,16 @@ def refresh_history_tab():
         return
         
     for real_idx, h in filtered_items:
+        file_path = h.get('file_path', '')
+        # Sync exact physical file size from disk if available
+        if file_path and os.path.isfile(file_path):
+            try:
+                actual_sz = format_size(os.path.getsize(file_path))
+                if actual_sz and h.get('size') != actual_sz:
+                    h['size'] = actual_sz
+            except Exception:
+                pass
+
         frame = ctk.CTkFrame(history_box_ref, fg_color=COL_PANEL, corner_radius=8)
         frame.pack(fill="x", pady=3, padx=6)
         
@@ -2605,16 +2736,38 @@ def refresh_history_tab():
         if len(title) > 60: title = title[:58] + "..."
         ctk.CTkLabel(center, text=title, font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x")
         
-        info_str = f"{h.get('quality', '—')}  |  {h.get('file_type', '—')}"
-        ctk.CTkLabel(center, text=info_str, font=("Consolas", 10), text_color=COL_MUTED, anchor="w").pack(fill="x", pady=(2, 0))
+        # Backward compatibility for segment
+        seg = h.get('segment') or ''
+        if not seg and '→' in h.get('mode', ''):
+            m_match = re.search(r'\[([\d:]+)→([\d:]+)\]', h.get('mode', ''))
+            if m_match:
+                seg = f"{m_match.group(1)}-{m_match.group(2)}"
+                h['segment'] = seg
+
+        # Duration resolution
+        dur = h.get('duration') or ''
+        if not dur and seg and '-' in seg:
+            try:
+                s_p, e_p = seg.split('-', 1)
+                s_v, e_v = parse_timestamp(s_p), parse_timestamp(e_p)
+                if s_v is not None and e_v is not None and e_v > s_v:
+                    dur = format_duration(e_v - s_v)
+                    h['duration'] = dur
+            except Exception:
+                pass
+
+        specs_lbl = ctk.CTkLabel(center, text="", font=("Consolas", 10), text_color=COL_MUTED, anchor="w")
+        specs_lbl.pack(fill="x", pady=(2, 0))
+        _update_history_specs_label(specs_lbl, h)
+        
+        if not dur and file_path and os.path.isfile(file_path):
+            _probe_history_duration_async(file_path, specs_lbl, h)
         
         # 4. Right side actions
         right = ctk.CTkFrame(row, fg_color="transparent")
         right.pack(side="right")
         
         ctk.CTkLabel(right, text=h.get('size', '—'), font=("Consolas", 11), text_color=COL_MUTED).pack(side="left", padx=(0, 10))
-        
-        file_path = h.get('file_path', '')
         
         def make_play_fn(fp=file_path, t=h.get('title', ''), m=h.get('mode', '')):
             def _play():
@@ -2637,7 +2790,8 @@ def refresh_history_tab():
                     if found and os.path.exists(found):
                         show_in_explorer(found)
                     else:
-                        open_folder(AUD_DIR if "Audio" in m else VID_DIR)
+                        target = os.path.dirname(fp) if fp and os.path.isdir(os.path.dirname(fp)) else (AUD_DIR if "Audio" in m else VID_DIR)
+                        open_folder(target)
             return _folder
             
         def make_open_fn(url=h.get('url', '')):
@@ -2966,7 +3120,7 @@ def create_aud_options(parent):
 
     return q_var, fmt_var, vol_boost_var, silence_trim_var
 
-def create_trimmer_card(parent, media_type="Video"):
+def create_trimmer_card(parent, media_type="Video", info_box_ref=None):
     """Interactive Start/End slider-based clip trimmer card with dynamic size calculation."""
     card = ctk.CTkFrame(parent, fg_color=COL_PANEL, corner_radius=8)
     card.pack(fill="x", padx=20, pady=(2, 6))
@@ -2975,7 +3129,8 @@ def create_trimmer_card(parent, media_type="Video"):
     state = {
         "duration": 0.0,
         "full_bytes": 0,
-        "is_syncing": False
+        "is_syncing": False,
+        "info_box": info_box_ref
     }
 
     # Header Row: Title + Live Size Badge + Reset Button
@@ -3046,15 +3201,47 @@ def create_trimmer_card(parent, media_type="Video"):
                 size_lbl.configure(text=f"Full: {format_size(fbytes)} ({format_duration(dur)})", text_color=COL_MUTED)
             else:
                 size_lbl.configure(text="Full media (no trim)", text_color=COL_MUTED)
+            box = state.get("info_box")
+            if box and fbytes > 0:
+                try:
+                    cur_text = box.get("1.0", "end").strip()
+                    if "Title:" in cur_text and "Size:" in cur_text:
+                        lines = cur_text.splitlines()
+                        new_lines = []
+                        for line in lines:
+                            if line.startswith("Size:"):
+                                new_lines.append(f"Size:   {format_size(fbytes)}")
+                            else:
+                                new_lines.append(line)
+                        update_info_box(box, "\n".join(new_lines), COL_ACCENT)
+                except Exception:
+                    pass
             return
 
         clip_sec = max(0.0, e - s)
         if dur > 0 and fbytes > 0:
-            est_b = int((clip_sec / dur) * fbytes)
+            raw_est = (clip_sec / dur) * fbytes
+            overhead = max(250 * 1024, raw_est * 0.05)
+            est_b = int(min(fbytes, raw_est + overhead))
             size_lbl.configure(
-                text=f"✂ Clip: {format_size(est_b)} ({format_duration(clip_sec)})  •  Full: {format_size(fbytes)}",
+                text=f"✂ Clip: ~{format_size(est_b)} ({format_duration(clip_sec)})  •  Full: {format_size(fbytes)}",
                 text_color=COL_SUCCESS
             )
+            box = state.get("info_box")
+            if box:
+                try:
+                    cur_text = box.get("1.0", "end").strip()
+                    if "Title:" in cur_text and "Size:" in cur_text:
+                        lines = cur_text.splitlines()
+                        new_lines = []
+                        for line in lines:
+                            if line.startswith("Size:"):
+                                new_lines.append(f"Size:   ~{format_size(est_b)} (Clip: {format_duration(s)}→{format_duration(e)})  •  Full: {format_size(fbytes)}")
+                            else:
+                                new_lines.append(line)
+                        update_info_box(box, "\n".join(new_lines), COL_ACCENT)
+                except Exception:
+                    pass
         else:
             size_lbl.configure(text=f"✂ Clip Duration: {format_duration(clip_sec)}", text_color=COL_ACCENT)
 
@@ -3093,8 +3280,15 @@ def create_trimmer_card(parent, media_type="Video"):
         sec = parse_timestamp(t)
         if sec is not None:
             state["is_syncing"] = True
-            dur = state["duration"] or 100.0
-            sec = min(dur, max(0.0, sec))
+            dur = state["duration"]
+            if dur > 0:
+                sec = min(dur, max(0.0, sec))
+            else:
+                if sec > end_slider.cget("to"):
+                    new_max = max(100.0, sec * 1.5)
+                    start_slider.configure(to=new_max)
+                    end_slider.configure(to=new_max)
+                sec = max(0.0, sec)
             start_slider.set(sec)
             state["is_syncing"] = False
             recalc_size()
@@ -3105,8 +3299,15 @@ def create_trimmer_card(parent, media_type="Video"):
         sec = parse_timestamp(t)
         if sec is not None:
             state["is_syncing"] = True
-            dur = state["duration"] or 100.0
-            sec = min(dur, max(0.0, sec))
+            dur = state["duration"]
+            if dur > 0:
+                sec = min(dur, max(0.0, sec))
+            else:
+                if sec > end_slider.cget("to"):
+                    new_max = max(100.0, sec * 1.5)
+                    start_slider.configure(to=new_max)
+                    end_slider.configure(to=new_max)
+                sec = max(0.0, sec)
             end_slider.set(sec)
             state["is_syncing"] = False
             recalc_size()
@@ -3117,16 +3318,35 @@ def create_trimmer_card(parent, media_type="Video"):
     class TrimmerController:
         def update_meta(self, duration, full_bytes):
             state["is_syncing"] = True
+            old_dur = state["duration"]
             state["duration"] = float(duration or 0.0)
             state["full_bytes"] = int(full_bytes or 0)
             dur = state["duration"]
+            
+            user_s = parse_timestamp(start_var.get().strip())
+            user_e = parse_timestamp(end_var.get().strip()) if end_var.get().strip() else None
+
             if dur > 0:
                 start_slider.configure(from_=0, to=dur, number_of_steps=max(10, int(dur)))
                 end_slider.configure(from_=0, to=dur, number_of_steps=max(10, int(dur)))
-                start_slider.set(0)
-                end_slider.set(dur)
-                start_var.set("00:00")
-                end_var.set(format_duration(dur))
+                
+                # Preserve custom user start if set
+                if user_s is not None and user_s > 0.0:
+                    s_clamped = min(user_s, dur)
+                    start_slider.set(s_clamped)
+                    start_var.set(format_duration(s_clamped))
+                else:
+                    start_slider.set(0)
+                    start_var.set("00:00")
+                
+                # Preserve custom user end if set
+                if user_e is not None and user_e > 0.0 and (old_dur == 0 or abs(user_e - old_dur) > 0.5) and user_e < dur:
+                    e_clamped = min(user_e, dur)
+                    end_slider.set(e_clamped)
+                    end_var.set(format_duration(e_clamped))
+                else:
+                    end_slider.set(dur)
+                    end_var.set(format_duration(dur))
             state["is_syncing"] = False
             recalc_size()
 
@@ -3135,13 +3355,27 @@ def create_trimmer_card(parent, media_type="Video"):
             e = end_slider.get()
             dur = state["duration"]
             fbytes = state["full_bytes"]
-            is_trimmed = (s > 0.5) or (dur > 0 and e < dur - 0.5) or (dur == 0 and e < 99.5 and end_var.get().strip() != "")
+            
+            s_parsed = parse_timestamp(start_var.get().strip())
+            if s_parsed is not None: s = s_parsed
+            e_parsed = parse_timestamp(end_var.get().strip()) if end_var.get().strip() else None
+            if e_parsed is not None: e = e_parsed
+            
+            is_trimmed = (s > 0.5) or (dur > 0 and e < dur - 0.5) or (dur == 0 and e_parsed is not None)
             if not is_trimmed:
                 return None, None, False, None
             clip_sec = max(0.0, e - s)
-            est_b = int((clip_sec / dur) * fbytes) if (dur > 0 and fbytes > 0) else 0
-            size_str = format_size(est_b) if est_b > 0 else None
+            if dur > 0 and fbytes > 0:
+                raw_est = (clip_sec / dur) * fbytes
+                overhead = max(250 * 1024, raw_est * 0.05)
+                est_b = int(min(fbytes, raw_est + overhead))
+                size_str = f"~{format_size(est_b)}"
+            else:
+                size_str = None
             return format_duration(s), format_duration(e), True, size_str
+
+        def set_info_box(self, box):
+            state["info_box"] = box
 
         def reset(self):
             reset_to_full()
@@ -3400,6 +3634,7 @@ make_divider(t1_scroll_main)
 btn_check_vid  = make_check_btn(t1_scroll_main, "Step 1 — Check size & preview", act_svid_check)
 vid_stale_banner = make_stale_banner(t1_scroll_main)
 vid_info_box   = make_info_box(t1_scroll_main, height=65)
+vid_trimmer.set_info_box(vid_info_box)
 btn_dl_vid, btn_q_vid = make_dl_btn_group(t1_scroll_main, "⬇  Download Video", act_svid_dl, lambda: act_svid_dl(start_paused=True))
 bind_keyboard_shortcuts(vid_entry, act_svid_dl)
 attach_auto_check([vid_q_var, vid_s_var, vid_fmt_var, vid_vol_var], vid_entry, act_svid_check)
@@ -3429,6 +3664,7 @@ make_divider(t2_scroll_main)
 btn_check_aud  = make_check_btn(t2_scroll_main, "Step 1 — Check size & preview", act_saud_check)
 aud_stale_banner = make_stale_banner(t2_scroll_main)
 aud_info_box   = make_info_box(t2_scroll_main, height=65)
+aud_trimmer.set_info_box(aud_info_box)
 btn_dl_aud, btn_q_aud = make_dl_btn_group(t2_scroll_main, "⬇  Download Audio", act_saud_dl, lambda: act_saud_dl(start_paused=True))
 bind_keyboard_shortcuts(aud_entry, act_saud_dl)
 attach_auto_check([aud_q_var, aud_fmt_var, aud_vol_var], aud_entry, act_saud_check)
